@@ -1,6 +1,6 @@
 import type React from "react";
 
-import { AudioLines } from "lucide-react";
+import { AudioLines, Loader2 } from "lucide-react";
 
 type WaveformPlayerProps = {
   containerRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -25,7 +25,7 @@ export function WaveformPlayer({
       </div>
 
       <div className="relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80 px-2 py-4 md:px-4 md:py-6">
-        <div ref={containerRef} className="min-h-[220px]" />
+        <div ref={containerRef} className="min-h-55" />
 
         {!hasAudio ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center text-zinc-500">
@@ -35,7 +35,10 @@ export function WaveformPlayer({
 
         {isLoading ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-zinc-950/70">
-            <p className="text-sm text-zinc-300">Loading waveform...</p>
+            <div className="flex items-center gap-2 text-sm text-zinc-300">
+              <Loader2 className="size-4 animate-spin" />
+              <p>Loading waveform...</p>
+            </div>
           </div>
         ) : null}
 

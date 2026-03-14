@@ -1,4 +1,4 @@
-import { Music2, Upload } from "lucide-react";
+import { Loader2, Music2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -46,7 +46,11 @@ export function TopBar({
           disabled={isSelecting}
           onClick={onSelectAudio}
         >
-          <Upload className="size-4" />
+          {isSelecting ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Upload className="size-4" />
+          )}
           {isSelecting ? "Opening..." : "Select Audio File"}
         </Button>
 

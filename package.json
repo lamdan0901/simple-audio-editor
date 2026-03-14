@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "AudioSlice desktop audio cutter and merger built with Electron + React",
+  "author": "AudioSlice",
   "type": "module",
   "scripts": {
     "dev": "vite",

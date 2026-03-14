@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { FolderPlus, ListPlus, Sparkles } from "lucide-react";
+import { FolderPlus, ListPlus, Loader2, Sparkles } from "lucide-react";
 
 import { MergeItem, type MergeQueueItem } from "@/components/merge/MergeItem";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,11 @@ export function MergePanel({
           disabled={isProcessing || items.length < 2}
           onClick={onMergeAll}
         >
-          <Sparkles className="size-3.5" />
+          {isProcessing ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="size-3.5" />
+          )}
           {isProcessing ? "Merging..." : "Merge All"}
         </Button>
       </div>

@@ -1,16 +1,21 @@
-import { app as v, BrowserWindow as w, ipcMain as f, dialog as h } from "electron";
-import { fileURLToPath as R } from "node:url";
-import a from "node:path";
-import { randomUUID as D } from "node:crypto";
-import { tmpdir as U } from "node:os";
-import { execFile as F } from "node:child_process";
-import { writeFile as W, unlink as $, stat as I } from "node:fs/promises";
-const N = a.dirname(R(import.meta.url));
-process.env.APP_ROOT = a.join(N, "..");
-const _ = process.env.VITE_DEV_SERVER_URL, me = a.join(process.env.APP_ROOT, "dist-electron"), L = a.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = _ ? a.join(process.env.APP_ROOT, "public") : L;
-let l;
-const j = [
+import { app as v, BrowserWindow as w, ipcMain as f, dialog as d } from "electron";
+import { fileURLToPath as U } from "node:url";
+import i from "node:path";
+import { existsSync as W } from "node:fs";
+import { randomUUID as j } from "node:crypto";
+import { tmpdir as $ } from "node:os";
+import { execFile as _ } from "node:child_process";
+import { writeFile as V, unlink as z, stat as I } from "node:fs/promises";
+const O = i.dirname(U(import.meta.url));
+process.env.APP_ROOT = i.join(O, "..");
+const y = process.env.VITE_DEV_SERVER_URL, ve = i.join(process.env.APP_ROOT, "dist-electron"), L = i.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = y ? i.join(process.env.APP_ROOT, "public") : L;
+const S = i.join(process.env.APP_ROOT, "resources", "icon.ico"), H = i.join(
+  process.env.VITE_PUBLIC,
+  "electron-vite.svg"
+), q = W(S) ? S : H;
+let m;
+const X = [
   "mp3",
   "wav",
   "flac",
@@ -21,35 +26,35 @@ const j = [
   "aiff",
   "aif",
   "opus"
-], E = /* @__PURE__ */ new Set([".mp3", ".m4a"]), S = /* @__PURE__ */ new Set([".wav", ".flac"]), V = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]);
-function x(t) {
+], E = /* @__PURE__ */ new Set([".mp3", ".m4a"]), A = /* @__PURE__ */ new Set([".wav", ".flac"]), B = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]), G = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]);
+function F(t) {
   return typeof t == "number" && Number.isFinite(t);
 }
 function p(t) {
-  return a.resolve(t);
+  return i.resolve(t);
 }
-function A(t) {
+function x(t) {
   return t.toFixed(3);
 }
 function P(t) {
-  return a.extname(t).toLowerCase();
+  return i.extname(t).toLowerCase();
 }
 async function T(t) {
   if (!(await I(t)).isFile())
     throw new Error("Input path must be a file.");
 }
-async function y(t) {
-  const e = a.dirname(t);
+async function N(t) {
+  const e = i.dirname(t);
   if (!(await I(e)).isDirectory())
     throw new Error("Output directory does not exist.");
 }
 function b(t) {
   return new Promise((e, n) => {
-    F(
+    _(
       "ffmpeg",
       t,
       { windowsHide: !0 },
-      (r, o, u) => {
+      (r, a, u) => {
         if (!r) {
           e();
           return;
@@ -60,9 +65,9 @@ function b(t) {
     );
   });
 }
-function z(t) {
+function k(t) {
   return new Promise((e, n) => {
-    F(
+    _(
       "ffprobe",
       [
         "-v",
@@ -75,11 +80,11 @@ function z(t) {
         t
       ],
       { windowsHide: !0 },
-      (o, u, s) => {
+      (a, u, s) => {
         var g;
-        if (o) {
-          const O = s.trim() || o.message || "FFprobe command failed.";
-          n(new Error(O));
+        if (a) {
+          const R = s.trim() || a.message || "FFprobe command failed.";
+          n(new Error(R));
           return;
         }
         let c;
@@ -89,32 +94,32 @@ function z(t) {
           n(new Error("Unable to parse FFprobe output."));
           return;
         }
-        const i = (g = c.streams) == null ? void 0 : g[0];
-        if (!(i != null && i.codec_name)) {
+        const o = (g = c.streams) == null ? void 0 : g[0];
+        if (!(o != null && o.codec_name)) {
           n(new Error("No primary audio stream found."));
           return;
         }
-        const m = Number.parseInt(i.sample_rate ?? "", 10);
-        if (!Number.isFinite(m) || m <= 0) {
+        const l = Number.parseInt(o.sample_rate ?? "", 10);
+        if (!Number.isFinite(l) || l <= 0) {
           n(new Error("Invalid audio sample rate from FFprobe."));
           return;
         }
-        const d = i.channels ?? 0;
-        if (!Number.isFinite(d) || d <= 0) {
+        const h = o.channels ?? 0;
+        if (!Number.isFinite(h) || h <= 0) {
           n(new Error("Invalid audio channel count from FFprobe."));
           return;
         }
         e({
-          codec: i.codec_name,
-          sampleRate: m,
-          channels: d,
-          channelLayout: i.channel_layout ?? ""
+          codec: o.codec_name,
+          sampleRate: l,
+          channels: h,
+          channelLayout: o.channel_layout ?? ""
         });
       }
     );
   });
 }
-function q(t) {
+function J(t) {
   if (!t || typeof t != "object")
     throw new Error("Invalid cut payload.");
   const e = t;
@@ -122,9 +127,9 @@ function q(t) {
     throw new Error("inputPath is required.");
   if (!e.outputPath || typeof e.outputPath != "string")
     throw new Error("outputPath is required.");
-  if (!x(e.startTime) || e.startTime < 0)
+  if (!F(e.startTime) || e.startTime < 0)
     throw new Error("startTime must be a finite number >= 0.");
-  if (!x(e.endTime) || e.endTime <= e.startTime)
+  if (!F(e.endTime) || e.endTime <= e.startTime)
     throw new Error("endTime must be greater than startTime.");
   if (e.endTime - e.startTime < 0.05)
     throw new Error("Cut duration must be at least 0.05 seconds.");
@@ -138,7 +143,7 @@ function q(t) {
     mode: e.mode
   };
 }
-function H(t) {
+function K(t) {
   if (!t || typeof t != "object")
     throw new Error("Invalid merge payload.");
   const e = t;
@@ -148,22 +153,22 @@ function H(t) {
     throw new Error("At least two files are required to merge.");
   if (!e.outputPath || typeof e.outputPath != "string")
     throw new Error("outputPath is required.");
-  const n = e.filePaths.map((o) => {
-    if (typeof o != "string" || o.trim().length === 0)
+  const n = e.filePaths.map((a) => {
+    if (typeof a != "string" || a.trim().length === 0)
       throw new Error("Each merge file path must be a non-empty string.");
-    return p(o);
+    return p(a);
   });
-  if (new Set(n.map(k)).size !== n.length)
+  if (new Set(n.map(Y)).size !== n.length)
     throw new Error("Duplicate file paths are not allowed in merge queue.");
   return {
     filePaths: n,
     outputPath: p(e.outputPath)
   };
 }
-function k(t) {
-  return a.normalize(t).toLowerCase();
+function Y(t) {
+  return i.normalize(t).toLowerCase();
 }
-function X(t, e, n) {
+function Q(t, e, n) {
   if (n !== "precise" && E.has(t)) {
     if (e !== t)
       throw new Error(
@@ -183,13 +188,42 @@ function X(t, e, n) {
     "Unsupported output extension. Use .mp3, .m4a, .wav, or .flac."
   );
 }
-function B(t) {
+function Z(t) {
   if (!t)
     return "";
   const e = t.trim().toLowerCase();
   return e ? e.startsWith(".") ? e : `.${e}` : "";
 }
-function G(t, e) {
+function M(t, e) {
+  if (typeof t != "string")
+    return e;
+  const n = t.trim();
+  return n && i.basename(n).replace(/[\u0000-\u001F\u007F]/g, "").trim() || e;
+}
+function ee(t) {
+  if (t == null)
+    return { defaultName: "clip.wav" };
+  if (typeof t != "object")
+    throw new Error("Invalid save-audio payload.");
+  const e = t, n = e.mode;
+  if (n && n !== "copy" && n !== "precise")
+    throw new Error("save-audio mode must be either copy or precise.");
+  return {
+    defaultName: M(e.defaultName, "clip.wav"),
+    inputExtension: Z(e.inputExtension),
+    mode: n
+  };
+}
+function te(t) {
+  if (t == null)
+    return { defaultName: "merged.wav" };
+  if (typeof t != "object")
+    throw new Error("Invalid save-merge payload.");
+  return {
+    defaultName: M(t.defaultName, "merged.wav")
+  };
+}
+function ne(t, e) {
   return E.has(t) && e !== "precise" ? t === ".mp3" ? [{ name: "MP3", extensions: ["mp3"] }] : [{ name: "M4A", extensions: ["m4a"] }] : E.has(t) ? [
     { name: "MP3", extensions: ["mp3"] },
     { name: "M4A", extensions: ["m4a"] },
@@ -200,7 +234,7 @@ function G(t, e) {
     { name: "FLAC", extensions: ["flac"] }
   ];
 }
-function J() {
+function re() {
   return [
     { name: "MP3", extensions: ["mp3"] },
     { name: "M4A", extensions: ["m4a"] },
@@ -208,33 +242,33 @@ function J() {
     { name: "FLAC", extensions: ["flac"] }
   ];
 }
-function Y(t) {
+function oe(t) {
   if (t === ".wav")
     return ["-c:a", "pcm_s16le"];
   if (t === ".flac")
     return ["-c:a", "flac"];
   throw new Error("Mixed-format merges must be saved as .wav or .flac.");
 }
-function K(t) {
+function ae(t) {
   const e = [], n = [];
   for (let r = 0; r < t; r += 1) {
-    const o = `a${r}`;
+    const a = `a${r}`;
     e.push(
-      `[${r}:a]aresample=48000,aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo[${o}]`
-    ), n.push(`[${o}]`);
+      `[${r}:a]aresample=48000,aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo[${a}]`
+    ), n.push(`[${a}]`);
   }
   return e.push(
     `${n.join("")}concat=n=${t}:v=0:a=1[outa]`
   ), e.join(";");
 }
-function Q(t) {
+function ie(t) {
   return t.replace(/'/g, "'\\''");
 }
-function Z(t) {
-  return t.map((e) => `file '${Q(e)}'`).join(`
+function se(t) {
+  return t.map((e) => `file '${ie(e)}'`).join(`
 `);
 }
-function ee(t) {
+function ue(t) {
   if (t.length < 2)
     return !1;
   const e = t[0];
@@ -247,15 +281,15 @@ function C(t, e) {
   );
   if (n.size === 0)
     return t;
-  const r = a.extname(t).toLowerCase().replace(/^\./, "");
+  const r = i.extname(t).toLowerCase().replace(/^\./, "");
   if (r && n.has(r))
     return t;
-  const o = (s = e == null ? void 0 : e[0]) == null ? void 0 : s.extensions[0];
-  return o ? `${a.extname(t).length > 0 ? t.slice(0, -a.extname(t).length) : t}.${o}` : t;
+  const a = (s = e == null ? void 0 : e[0]) == null ? void 0 : s.extensions[0];
+  return a ? `${i.extname(t).length > 0 ? t.slice(0, -i.extname(t).length) : t}.${a}` : t;
 }
-function te() {
+function ce() {
   return new Promise((t) => {
-    F("ffmpeg", ["-version"], { windowsHide: !0 }, (e, n) => {
+    _("ffmpeg", ["-version"], { windowsHide: !0 }, (e, n) => {
       if (e) {
         t({ available: !1, version: "" });
         return;
@@ -265,69 +299,66 @@ function te() {
     });
   });
 }
-function ne() {
-  f.handle("ffmpeg:check", () => te()), f.handle("dialog:open-audio", async () => {
+function le() {
+  f.handle("ffmpeg:check", () => ce()), f.handle("dialog:open-audio", async () => {
     const t = {
       title: "Select Audio File",
       properties: ["openFile", "multiSelections"],
       filters: [
         {
           name: "Audio Files",
-          extensions: j
+          extensions: X
         }
       ]
-    }, e = l ?? w.getFocusedWindow(), n = e ? await h.showOpenDialog(e, t) : await h.showOpenDialog(t);
+    }, e = m ?? w.getFocusedWindow(), n = e ? await d.showOpenDialog(e, t) : await d.showOpenDialog(t);
     return n.canceled ? { filePaths: [] } : {
       filePaths: n.filePaths.map(
-        (r) => a.resolve(r)
+        (r) => i.resolve(r)
       )
     };
-  }), f.handle(
-    "dialog:save-audio",
-    async (t, e) => {
-      const n = typeof (e == null ? void 0 : e.defaultName) == "string" && e.defaultName.trim().length > 0 ? e.defaultName.trim() : "clip.wav", r = B(e == null ? void 0 : e.inputExtension), o = G(r, e == null ? void 0 : e.mode), s = {
-        title: "Save Cut Audio",
-        defaultPath: C(
-          n,
-          o
-        ),
-        filters: o
-      }, c = l ?? w.getFocusedWindow(), i = c ? await h.showSaveDialog(c, s) : await h.showSaveDialog(s);
-      return i.canceled || !i.filePath ? { filePath: void 0 } : { filePath: p(i.filePath) };
-    }
-  ), f.handle(
-    "dialog:save-merge",
-    async (t, e) => {
-      const n = typeof (e == null ? void 0 : e.defaultName) == "string" && e.defaultName.trim().length > 0 ? e.defaultName.trim() : "merged.wav", r = J(), u = {
-        title: "Save Merged Audio",
-        defaultPath: C(
-          n,
-          r
-        ),
-        filters: r
-      }, s = l ?? w.getFocusedWindow(), c = s ? await h.showSaveDialog(s, u) : await h.showSaveDialog(u);
-      return c.canceled || !c.filePath ? { filePath: void 0 } : { filePath: p(c.filePath) };
-    }
-  ), f.handle("audio:cut", async (t, e) => {
-    const n = q(e);
-    await T(n.inputPath), await y(n.outputPath);
-    const r = P(n.inputPath), o = P(n.outputPath);
+  }), f.handle("dialog:save-audio", async (t, e) => {
+    const n = ee(e), r = n.defaultName ?? "clip.wav", a = ne(
+      n.inputExtension ?? "",
+      n.mode
+    ), s = {
+      title: "Save Cut Audio",
+      defaultPath: C(
+        r,
+        a
+      ),
+      filters: a
+    }, c = m ?? w.getFocusedWindow(), o = c ? await d.showSaveDialog(c, s) : await d.showSaveDialog(s);
+    return o.canceled || !o.filePath ? { filePath: void 0 } : { filePath: p(o.filePath) };
+  }), f.handle("dialog:save-merge", async (t, e) => {
+    const r = te(e).defaultName ?? "merged.wav", a = re(), s = {
+      title: "Save Merged Audio",
+      defaultPath: C(
+        r,
+        a
+      ),
+      filters: a
+    }, c = m ?? w.getFocusedWindow(), o = c ? await d.showSaveDialog(c, s) : await d.showSaveDialog(s);
+    return o.canceled || !o.filePath ? { filePath: void 0 } : { filePath: p(o.filePath) };
+  }), f.handle("audio:cut", async (t, e) => {
+    const n = J(e);
+    await T(n.inputPath), await N(n.outputPath);
+    const r = P(n.inputPath), a = P(n.outputPath);
     if (E.has(r)) {
-      if (n.mode !== "precise" && o !== r)
+      if (n.mode !== "precise" && a !== r)
         throw new Error(
           "Output extension must match input for MP3/M4A passthrough cuts."
         );
-    } else if (!S.has(o))
+    } else if (!A.has(a))
       throw new Error("For non-MP3/M4A sources, output must be .wav or .flac.");
-    const u = X(r, o, n.mode), s = [
+    const u = Q(r, a, n.mode), s = [
       "-hide_banner",
       "-loglevel",
       "error",
       "-y",
       "-ss",
-      A(n.startTime),
+      x(n.startTime),
       "-to",
-      A(n.endTime),
+      x(n.endTime),
       "-i",
       n.inputPath,
       ...u,
@@ -335,33 +366,36 @@ function ne() {
     ];
     return await b(s), { success: !0, outputPath: n.outputPath };
   }), f.handle("audio:merge", async (t, e) => {
-    const n = H(e);
-    await y(n.outputPath), await Promise.all(n.filePaths.map((i) => T(i)));
+    const n = K(e);
+    await N(n.outputPath), await Promise.all(n.filePaths.map((o) => T(o)));
     const r = n.filePaths.map(
-      (i) => P(i)
-    ), o = r[0], u = P(n.outputPath), s = r.every(
-      (i) => i === o
+      (o) => P(o)
+    ), a = r[0], u = P(n.outputPath);
+    if (!G.has(u))
+      throw new Error("Merge output must use .mp3, .m4a, .wav, or .flac.");
+    const s = r.every(
+      (o) => o === a
     );
     let c = !1;
-    if (s && V.has(o)) {
-      const i = await Promise.all(
-        n.filePaths.map((m) => z(m))
+    if (s && B.has(a)) {
+      const o = await Promise.all(
+        n.filePaths.map((l) => k(l))
       );
-      c = ee(i);
+      c = ue(o);
     }
     if (c) {
-      if (u !== o)
+      if (u !== a)
         throw new Error(
           "For stream-copy merge, output extension must match source files."
         );
-      const i = a.join(
-        U(),
-        `audioslice-merge-${D()}.txt`
+      const o = i.join(
+        $(),
+        `audioslice-merge-${j()}.txt`
       );
       try {
-        await W(
-          i,
-          Z(n.filePaths),
+        await V(
+          o,
+          se(n.filePaths),
           {
             encoding: "utf8"
           }
@@ -375,64 +409,64 @@ function ne() {
           "-safe",
           "0",
           "-i",
-          i,
+          o,
           "-c",
           "copy",
           n.outputPath
         ]);
       } finally {
-        await $(i).catch(() => {
+        await z(o).catch(() => {
         });
       }
     } else {
-      if (!S.has(u))
+      if (!A.has(u))
         throw new Error("Mixed-format merges must be saved as .wav or .flac.");
-      const i = n.filePaths.flatMap((g) => [
+      const o = n.filePaths.flatMap((g) => [
         "-i",
         g
-      ]), m = K(n.filePaths.length), d = Y(u);
+      ]), l = ae(n.filePaths.length), h = oe(u);
       await b([
         "-hide_banner",
         "-loglevel",
         "error",
         "-y",
-        ...i,
+        ...o,
         "-filter_complex",
-        m,
+        l,
         "-map",
         "[outa]",
-        ...d,
+        ...h,
         n.outputPath
       ]);
     }
     return { success: !0, outputPath: n.outputPath };
   });
 }
-function M() {
-  l = new w({
+function D() {
+  m = new w({
     width: 1200,
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    icon: a.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: q,
     webPreferences: {
-      preload: a.join(N, "preload.mjs"),
+      preload: i.join(O, "preload.mjs"),
       contextIsolation: !0,
       nodeIntegration: !1
     }
-  }), _ ? l.loadURL(_) : l.loadFile(a.join(L, "index.html"));
+  }), y ? m.loadURL(y) : m.loadFile(i.join(L, "index.html"));
 }
 v.on("window-all-closed", () => {
-  process.platform !== "darwin" && (v.quit(), l = null);
+  process.platform !== "darwin" && (v.quit(), m = null);
 });
 v.on("activate", () => {
-  w.getAllWindows().length === 0 && M();
+  w.getAllWindows().length === 0 && D();
 });
 v.whenReady().then(() => {
-  ne(), M();
+  le(), D();
 });
 export {
-  me as MAIN_DIST,
+  ve as MAIN_DIST,
   L as RENDERER_DIST,
-  _ as VITE_DEV_SERVER_URL
+  y as VITE_DEV_SERVER_URL
 };

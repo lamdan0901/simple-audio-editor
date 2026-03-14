@@ -404,14 +404,14 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 
 ### Phase 5: Polish & Packaging
 
-- [ ] Error handling: FFmpeg failures surface as user-friendly toasts
-- [ ] Loading states: disable buttons + show spinner during processing
-- [ ] Edge cases: empty regions, 0-duration selections, duplicate merge items
-- [ ] Main-process payload validation rules enforced for all IPC write operations
-- [ ] Keyboard shortcuts: Space = play/pause, Delete = remove selected region
-- [ ] Configure electron-builder for Windows (NSIS installer)
-- [ ] App icon + metadata (name, version, description)
-- [ ] Build & test installer: `npm run build`
+- [x] Error handling: FFmpeg failures surface as user-friendly toasts
+- [x] Loading states: disable buttons + show spinner during processing
+- [x] Edge cases: empty regions, 0-duration selections, duplicate merge items
+- [x] Main-process payload validation rules enforced for all IPC write operations
+- [x] Keyboard shortcuts: Space = play/pause, Delete = remove selected region
+- [x] Configure electron-builder for Windows (NSIS installer)
+- [x] App icon + metadata (name, version, description)
+- [x] Build & test installer: `npm run build`
 - [ ] Final smoke test on clean Windows machine
 
 ---
@@ -472,10 +472,10 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 
 ## 9. Security Checklist
 
-- [ ] `contextIsolation: true` in webPreferences
-- [ ] `nodeIntegration: false` in webPreferences
-- [ ] All FFmpeg calls via `execFile` (no shell interpolation)
-- [ ] File paths validated before passing to FFmpeg
-- [ ] Temp files created in `os.tmpdir()` and cleaned up in `finally`
-- [ ] No remote content loaded — all local
-- [ ] IPC channels use `handle`/`invoke` pattern (not `send`/`on` for sensitive ops)
+- [x] `contextIsolation: true` in webPreferences
+- [x] `nodeIntegration: false` in webPreferences
+- [x] All FFmpeg calls via `execFile` (no shell interpolation)
+- [x] File paths validated before passing to FFmpeg
+- [x] Temp files created in `os.tmpdir()` and cleaned up in `finally`
+- [x] No remote content loaded — all local
+- [x] IPC channels use `handle`/`invoke` pattern (not `send`/`on` for sensitive ops)

@@ -8,6 +8,7 @@ import {
 } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -34,6 +35,15 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
   : RENDERER_DIST;
+
+const APP_ICON_PATH = path.join(process.env.APP_ROOT, "resources", "icon.ico");
+const FALLBACK_ICON_PATH = path.join(
+  process.env.VITE_PUBLIC,
+  "electron-vite.svg",
+);
+const WINDOW_ICON_PATH = existsSync(APP_ICON_PATH)
+  ? APP_ICON_PATH
+  : FALLBACK_ICON_PATH;
 
 let win: BrowserWindow | null;
 
@@ -98,6 +108,7 @@ const AUDIO_EXTENSIONS = [
 const PASSTHROUGH_EXTENSIONS = new Set([".mp3", ".m4a"]);
 const LOSSLESS_OUTPUT_EXTENSIONS = new Set([".wav", ".flac"]);
 const COPY_MERGE_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".flac"]);
+const MERGE_OUTPUT_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".flac"]);
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -352,6 +363,64 @@ function normalizeExtension(value: string | undefined): string {
   return normalized.startsWith(".") ? normalized : `.${normalized}`;
 }
 
+function sanitizeDefaultName(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const basenameOnly = path.basename(trimmed);
+  const noControlChars = basenameOnly.replace(/[\u0000-\u001F\u007F]/g, "");
+  const safe = noControlChars.trim();
+  return safe || fallback;
+}
+
+function validateSaveAudioDialogPayload(
+  payload: unknown,
+): SaveAudioDialogPayload {
+  if (payload == null) {
+    return { defaultName: "clip.wav" };
+  }
+
+  if (typeof payload !== "object") {
+    throw new Error("Invalid save-audio payload.");
+  }
+
+  const candidate = payload as Partial<SaveAudioDialogPayload>;
+  const mode = candidate.mode;
+  if (mode && mode !== "copy" && mode !== "precise") {
+    throw new Error("save-audio mode must be either copy or precise.");
+  }
+
+  return {
+    defaultName: sanitizeDefaultName(candidate.defaultName, "clip.wav"),
+    inputExtension: normalizeExtension(candidate.inputExtension),
+    mode,
+  };
+}
+
+function validateSaveMergeDialogPayload(
+  payload: unknown,
+): SaveMergeDialogPayload {
+  if (payload == null) {
+    return { defaultName: "merged.wav" };
+  }
+
+  if (typeof payload !== "object") {
+    throw new Error("Invalid save-merge payload.");
+  }
+
+  const candidate = payload as Partial<SaveMergeDialogPayload>;
+
+  return {
+    defaultName: sanitizeDefaultName(candidate.defaultName, "merged.wav"),
+  };
+}
+
 function buildSaveAudioFilters(
   inputExtension: string,
   mode?: "copy" | "precise",
@@ -530,74 +599,64 @@ function registerIpcHandlers() {
     };
   });
 
-  ipcMain.handle(
-    "dialog:save-audio",
-    async (_event, payload?: SaveAudioDialogPayload) => {
-      const requestedDefaultName =
-        typeof payload?.defaultName === "string" &&
-        payload.defaultName.trim().length > 0
-          ? payload.defaultName.trim()
-          : "clip.wav";
+  ipcMain.handle("dialog:save-audio", async (_event, payload: unknown) => {
+    const validated = validateSaveAudioDialogPayload(payload);
+    const requestedDefaultName = validated.defaultName ?? "clip.wav";
 
-      const inputExtension = normalizeExtension(payload?.inputExtension);
-      const filters = buildSaveAudioFilters(inputExtension, payload?.mode);
-      const defaultName = alignDefaultNameExtension(
-        requestedDefaultName,
-        filters,
-      );
+    const filters = buildSaveAudioFilters(
+      validated.inputExtension ?? "",
+      validated.mode,
+    );
+    const defaultName = alignDefaultNameExtension(
+      requestedDefaultName,
+      filters,
+    );
 
-      const options: SaveDialogOptions = {
-        title: "Save Cut Audio",
-        defaultPath: defaultName,
-        filters,
-      };
+    const options: SaveDialogOptions = {
+      title: "Save Cut Audio",
+      defaultPath: defaultName,
+      filters,
+    };
 
-      const browserWindow = win ?? BrowserWindow.getFocusedWindow();
-      const result = browserWindow
-        ? await dialog.showSaveDialog(browserWindow, options)
-        : await dialog.showSaveDialog(options);
+    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
+    const result = browserWindow
+      ? await dialog.showSaveDialog(browserWindow, options)
+      : await dialog.showSaveDialog(options);
 
-      if (result.canceled || !result.filePath) {
-        return { filePath: undefined };
-      }
+    if (result.canceled || !result.filePath) {
+      return { filePath: undefined };
+    }
 
-      return { filePath: toAbsolutePath(result.filePath) };
-    },
-  );
+    return { filePath: toAbsolutePath(result.filePath) };
+  });
 
-  ipcMain.handle(
-    "dialog:save-merge",
-    async (_event, payload?: SaveMergeDialogPayload) => {
-      const requestedDefaultName =
-        typeof payload?.defaultName === "string" &&
-        payload.defaultName.trim().length > 0
-          ? payload.defaultName.trim()
-          : "merged.wav";
+  ipcMain.handle("dialog:save-merge", async (_event, payload: unknown) => {
+    const validated = validateSaveMergeDialogPayload(payload);
+    const requestedDefaultName = validated.defaultName ?? "merged.wav";
 
-      const filters = buildSaveMergeFilters();
-      const defaultName = alignDefaultNameExtension(
-        requestedDefaultName,
-        filters,
-      );
+    const filters = buildSaveMergeFilters();
+    const defaultName = alignDefaultNameExtension(
+      requestedDefaultName,
+      filters,
+    );
 
-      const options: SaveDialogOptions = {
-        title: "Save Merged Audio",
-        defaultPath: defaultName,
-        filters,
-      };
+    const options: SaveDialogOptions = {
+      title: "Save Merged Audio",
+      defaultPath: defaultName,
+      filters,
+    };
 
-      const browserWindow = win ?? BrowserWindow.getFocusedWindow();
-      const result = browserWindow
-        ? await dialog.showSaveDialog(browserWindow, options)
-        : await dialog.showSaveDialog(options);
+    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
+    const result = browserWindow
+      ? await dialog.showSaveDialog(browserWindow, options)
+      : await dialog.showSaveDialog(options);
 
-      if (result.canceled || !result.filePath) {
-        return { filePath: undefined };
-      }
+    if (result.canceled || !result.filePath) {
+      return { filePath: undefined };
+    }
 
-      return { filePath: toAbsolutePath(result.filePath) };
-    },
-  );
+    return { filePath: toAbsolutePath(result.filePath) };
+  });
 
   ipcMain.handle("audio:cut", async (_event, payload: unknown) => {
     const params = validateCutPayload(payload);
@@ -651,6 +710,10 @@ function registerIpcHandlers() {
     );
     const firstSourceExt = sourceExtensions[0];
     const outputExt = getExtension(params.outputPath);
+
+    if (!MERGE_OUTPUT_EXTENSIONS.has(outputExt)) {
+      throw new Error("Merge output must use .mp3, .m4a, .wav, or .flac.");
+    }
 
     const allSameSourceExtension = sourceExtensions.every(
       (ext) => ext === firstSourceExt,
@@ -742,7 +805,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: WINDOW_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
       contextIsolation: true,

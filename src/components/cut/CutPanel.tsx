@@ -1,4 +1,4 @@
-import { Scissors, Sparkles } from "lucide-react";
+import { Loader2, Scissors, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { WaveformRegion } from "@/hooks/useWaveSurfer";
@@ -88,7 +88,11 @@ export function CutPanel({
           disabled={disabled || isProcessing || !selectedRegion}
           onClick={onCutAndSave}
         >
-          <Scissors className="size-4" />
+          {isProcessing ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Scissors className="size-4" />
+          )}
           {isProcessing ? "Cutting..." : "Cut & Save"}
         </Button>
 

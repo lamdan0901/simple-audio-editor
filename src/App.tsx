@@ -16,6 +16,8 @@ type FfmpegState = {
   version: string;
 };
 
+const MIN_CUT_DURATION_SECONDS = 0.05;
+
 function App() {
   const [ffmpeg, setFfmpeg] = useState<FfmpegState>({
     loading: true,
@@ -89,6 +91,43 @@ function App() {
     setLastCutPath(null);
   }, [audioFilePath]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isInteractiveElement(event.target)) {
+        return;
+      }
+
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (!isReady) {
+          return;
+        }
+
+        if (isPlaying) {
+          pause();
+          return;
+        }
+
+        void play().catch((err) => {
+          toast.error("Unable to start playback", {
+            description: getUserFacingError(err),
+          });
+        });
+        return;
+      }
+
+      if (event.key === "Delete" && selectedRegionId) {
+        event.preventDefault();
+        removeRegion(selectedRegionId);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isPlaying, isReady, pause, play, removeRegion, selectedRegionId]);
+
   const handleSelectAudio = async () => {
     setIsSelectingAudio(true);
     setSelectAudioError(null);
@@ -113,7 +152,28 @@ function App() {
   };
 
   const handleCutAndSave = async () => {
-    if (!audioFilePath || !selectedRegion) {
+    if (!audioFilePath) {
+      toast.error("No source file selected", {
+        description: "Choose an audio file before cutting.",
+      });
+      return;
+    }
+
+    if (!selectedRegion) {
+      toast.error("No region selected", {
+        description: "Create or select a region before cutting.",
+      });
+      return;
+    }
+
+    const cutDuration = selectedRegion.end - selectedRegion.start;
+    if (
+      !Number.isFinite(cutDuration) ||
+      cutDuration < MIN_CUT_DURATION_SECONDS
+    ) {
+      toast.error("Region is too short", {
+        description: `Minimum duration is ${MIN_CUT_DURATION_SECONDS.toFixed(2)}s.`,
+      });
       return;
     }
 
@@ -157,9 +217,8 @@ function App() {
         description: getFileName(outputPath),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
       toast.error("Failed to cut audio", {
-        description: message,
+        description: getUserFacingError(err),
       });
     } finally {
       setIsProcessing(false);
@@ -201,9 +260,8 @@ function App() {
         toast.message("All selected files are already in queue");
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
       toast.error("Unable to import merge files", {
-        description: message,
+        description: getUserFacingError(err),
       });
     } finally {
       setIsImportingMergeFiles(false);
@@ -252,6 +310,16 @@ function App() {
       return;
     }
 
+    const uniqueMergePaths = new Set(
+      mergeQueue.map((item) => normalizeForCompare(item.filePath)),
+    );
+    if (uniqueMergePaths.size !== mergeQueue.length) {
+      toast.error("Merge queue contains duplicate files", {
+        description: "Remove duplicates before merging.",
+      });
+      return;
+    }
+
     const mergePaths = mergeQueue.map((item) => item.filePath);
     const outputExtension = suggestMergeOutputExtension(mergePaths);
     const defaultName = `merged${outputExtension}`;
@@ -279,9 +347,8 @@ function App() {
         description: getFileName(outputPath),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
       toast.error("Failed to merge audio", {
-        description: message,
+        description: getUserFacingError(err),
       });
     } finally {
       setIsProcessing(false);
@@ -525,6 +592,46 @@ function suggestMergeOutputExtension(
   }
 
   return ".wav";
+}
+
+function isInteractiveElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return true;
+  }
+
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  return Boolean(target.closest("[contenteditable='true']"));
+}
+
+function getUserFacingError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "Unknown error";
+  const normalized = raw.trim();
+
+  if (!normalized) {
+    return "Unexpected error while processing audio.";
+  }
+
+  if (/ffmpeg|ffprobe/i.test(normalized)) {
+    return "Audio processing failed. Check FFmpeg availability and selected format options.";
+  }
+
+  if (/no such file|cannot find|enoent/i.test(normalized)) {
+    return "A selected file or folder path no longer exists.";
+  }
+
+  if (/permission|access is denied|eacces|eperm/i.test(normalized)) {
+    return "Access denied for one of the selected paths.";
+  }
+
+  return normalized;
 }
 
 export default App;
