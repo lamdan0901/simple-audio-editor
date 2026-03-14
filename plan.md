@@ -374,33 +374,33 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 
 ### Phase 2: Audio Loading & Waveform
 
-- [ ] Implement `dialog:open-audio` IPC handler (native file picker, filter by audio extensions)
-- [ ] Build `TopBar` with "Select Audio File" button
-- [ ] Create `useWaveSurfer` hook — init wavesurfer.js on a container ref
-- [ ] Build `WaveformPlayer` component — render waveform from selected file
-- [ ] Build `TransportControls` — Play / Pause / Stop
-- [ ] Style waveform container + controls with Tailwind
+- [x] Implement `dialog:open-audio` IPC handler (native file picker, filter by audio extensions)
+- [x] Build `TopBar` with "Select Audio File" button
+- [x] Create `useWaveSurfer` hook — init wavesurfer.js on a container ref
+- [x] Build `WaveformPlayer` component — render waveform from selected file
+- [x] Build `TransportControls` — Play / Pause / Stop
+- [x] Style waveform container + controls with Tailwind
 
 ### Phase 3: Regions & Cutting
 
-- [ ] Enable Regions plugin in wavesurfer.js
-- [ ] Implement multi-region creation, resize, delete
-- [ ] Build `RegionList` — display all regions with formatted timestamps
-- [ ] Build `CutPanel` — show selected region details + "Cut & Save" button
-- [ ] Implement `dialog:save-audio` IPC handler
-- [ ] Implement `audio:cut` IPC handler (default passthrough for MP3/M4A + precise mode toggle)
-- [ ] Wire up full cut flow: select region → cut → save → toast notification
-- [ ] Add "Add to merge queue" action on successful cut
+- [x] Enable Regions plugin in wavesurfer.js
+- [x] Implement multi-region creation, resize, delete
+- [x] Build `RegionList` — display all regions with formatted timestamps
+- [x] Build `CutPanel` — show selected region details + "Cut & Save" button
+- [x] Implement `dialog:save-audio` IPC handler
+- [x] Implement `audio:cut` IPC handler (default passthrough for MP3/M4A + precise mode toggle)
+- [x] Wire up full cut flow: select region → cut → save → toast notification
+- [x] Add "Add to merge queue" action on successful cut
 
 ### Phase 4: Merge
 
-- [ ] Build `MergePanel` with file queue list
-- [ ] Add "Import files" button to queue external audio files
-- [ ] Implement drag-and-drop reordering in merge queue
-- [ ] Build `MergeItem` component (file name, remove button, drag handle)
-- [ ] Implement `dialog:save-merge` IPC handler
-- [ ] Implement `audio:merge` IPC handler (compatibility preflight → concat demuxer copy or filter-concat re-encode)
-- [ ] Wire up merge flow end-to-end with toast notifications
+- [x] Build `MergePanel` with file queue list
+- [x] Add "Import files" button to queue external audio files
+- [x] Implement drag-and-drop reordering in merge queue
+- [x] Build `MergeItem` component (file name, remove button, drag handle)
+- [x] Implement `dialog:save-merge` IPC handler
+- [x] Implement `audio:merge` IPC handler (compatibility preflight → concat demuxer copy or filter-concat re-encode)
+- [x] Wire up merge flow end-to-end with toast notifications
 
 ### Phase 5: Polish & Packaging
 

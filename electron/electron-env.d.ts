@@ -26,7 +26,11 @@ interface Window {
   api: {
     checkFfmpeg: () => Promise<{ available: boolean; version: string }>;
     openAudioFile: () => Promise<{ filePaths: string[] }>;
-    saveAudioFile: (defaultName: string) => Promise<{ filePath?: string }>;
+    saveAudioFile: (params: {
+      defaultName: string;
+      inputExtension?: string;
+      mode?: "copy" | "precise";
+    }) => Promise<{ filePath?: string }>;
     saveMergeFile: (defaultName: string) => Promise<{ filePath?: string }>;
     cutAudio: (params: {
       inputPath: string;
