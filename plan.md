@@ -357,15 +357,20 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 
 ## 5. Implementation Phases
 
+### Progress Tracking Rule
+
+- After implementing and verifying any checklist item in this plan, immediately update its checkbox from `[ ]` to `[x]` in the same working session.
+- If implementation is partial or unverified, keep the item unchecked and add a short note in the relevant phase section.
+
 ### Phase 1: Skeleton & FFmpeg Check
 
-- [ ] Scaffold project with electron-vite (react-ts template)
-- [ ] Configure Tailwind CSS + shadcn/ui
-- [ ] Set up main process with window creation
-- [ ] Implement preload context bridge (empty stubs)
-- [ ] Implement `ffmpeg:check` IPC handler
-- [ ] Build `FfmpegGuard` component (blocks UI if FFmpeg missing)
-- [ ] Verify dev workflow: `npm run dev` launches Electron with React HMR
+- [x] Scaffold project with electron-vite (react-ts template)
+- [x] Configure Tailwind CSS + shadcn/ui
+- [x] Set up main process with window creation
+- [x] Implement preload context bridge (empty stubs)
+- [x] Implement `ffmpeg:check` IPC handler
+- [x] Build `FfmpegGuard` component (blocks UI if FFmpeg missing)
+- [x] Verify dev workflow: `npm run dev` launches Electron with React HMR
 
 ### Phase 2: Audio Loading & Waveform
 
