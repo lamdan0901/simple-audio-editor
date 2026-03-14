@@ -11,17 +11,17 @@ A lightweight Windows desktop application that allows users to import local audi
 - **Frontend UI Framework:** React
 - **Language:** TypeScript (for type-safe IPC communication, UI props, and FFmpeg arguments)
 - **Audio Visualization:** `wavesurfer.js` (using the **Regions plugin** for visual, draggable time selection)
-- **Process Execution:** Node.js native `child_process` (`exec` or `spawn` to run FFmpeg)
+- **Process Execution:** Node.js native `child_process` (`execFile` preferred to run FFmpeg safely)
 
 ## 3. Core Architecture
 
 Due to Electron's security model, terminal commands cannot (and should not) be run directly from the frontend. The app uses a two-process architecture:
 
-- **Renderer Process (React UI):** \* Handles file selection and renders `wavesurfer.js`.
+- **Renderer Process (React UI):** Handles file selection and renders `wavesurfer.js`.
   - Manages audio playback state (play/pause).
   - Captures the exact `startTime` and `endTime` from the user's visual selection.
   - Sends requests to the backend via Electron's `contextBridge` (IPC).
-- **Main Process (Node.js Backend):** \* Listens for IPC events from the React frontend.
+- **Main Process (Node.js Backend):** Listens for IPC events from the React frontend.
   - Checks for FFmpeg installation.
   - Executes the FFmpeg commands using Node's `child_process`.
   - Handles file system operations (like generating temporary text files for merging) via the `fs` module.
@@ -29,7 +29,7 @@ Due to Electron's security model, terminal commands cannot (and should not) be r
 
 ## 4. User Interface Layout
 
-- **Top Bar:** \* "Select Audio File" button (triggers native OS file picker).
+- **Top Bar:** "Select Audio File" button (triggers native OS file picker).
 - **Main Canvas (Center):**
   - The `wavesurfer.js` visual waveform.
   - Draggable "Region" overlays to visually highlight the cut area.
@@ -51,8 +51,9 @@ Before enabling the UI, the main process must verify FFmpeg is available in the 
 
 Triggered when the user clicks "Cut & Save".
 
-- **Command:** `ffmpeg -i "input_path.mp3" -ss [START_TIME] -to [END_TIME] -c copy "output_path.mp3"`
-- **Note:** The `-c copy` flag copies the stream without re-encoding, which is extremely fast but snaps to the nearest keyframe. For frame-perfect cuts (at the cost of processing time), omit `-c copy`.
+- **Fast copy command (MP3/M4A passthrough):** `ffmpeg -ss [START_TIME] -to [END_TIME] -i "input_path.mp3" -c copy "output_path.mp3"`
+- **Precise command (re-encode):** `ffmpeg -ss [START_TIME] -to [END_TIME] -i "input_path.mp3" -c:a libmp3lame -b:a 192k "output_path.mp3"`
+- **Note:** `-c copy` is extremely fast but can be packet-boundary aligned. For sample-accurate cuts, re-encode.
 
 ### C. Merging Audio
 
@@ -65,9 +66,13 @@ FFmpeg requires a text file to merge files cleanly using the `concat` demuxer. T
   ```
 
 * **Step 2:** Execute the merge command.
-* **Command:** `ffmpeg -f concat -safe 0 -i "merge_list.txt" -c copy "merged_output.mp3"`
+* **Command (homogeneous streams):** `ffmpeg -f concat -safe 0 -i "merge_list.txt" -c copy "merged_output.mp3"`
+
+* **Command (mixed formats/codecs):** `ffmpeg -i "clip1.wav" -i "clip2.mp3" -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1[outa]" -map "[outa]" -c:a pcm_s16le "merged_output.wav"`
 
 * **Step 3:** Clean up (delete) `merge_list.txt`.
+
+* **Path safety note:** When writing `merge_list.txt`, escape single quotes in Windows paths by replacing `'` with `'\''` in concat entries.
 
 ## 6. App Workflow / State Machine
 
@@ -75,4 +80,4 @@ FFmpeg requires a text file to merge files cleanly using the `concat` demuxer. T
 2. **Load:** User selects an audio file -> Path is passed to `wavesurfer.js` -> Waveform renders.
 3. **Select:** User drags sliders on the waveform -> React state updates with `startTime` and `endTime` (in seconds).
 4. **Execute Cut:** User clicks "Cut" -> Native Save Dialog asks for destination -> React sends IPC message to Main process -> FFmpeg cuts file -> UI shows "Success" notification.
-5. **Execute Merge:** User queues multiple files in the Merge panel -> Clicks "Merge" -> Main process creates `merge_list.txt` in an OS temp folder -> Executes FFmpeg concat -> Deletes temp file -> UI shows "Success" notification.
+5. **Execute Merge:** User queues multiple files in the Merge panel -> Clicks "Merge" -> Main process checks compatibility -> Uses concat demuxer + `-c copy` for compatible streams, otherwise filter-based concat + re-encode -> Cleans up temp resources -> UI shows "Success" notification.

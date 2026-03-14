@@ -2,17 +2,18 @@
 
 ## 0. Decisions & Constraints
 
-| Topic             | Decision                                                                                                                                     |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Audio formats     | All FFmpeg-supported input formats (MP3, WAV, FLAC, OGG, AAC, M4A, WMA, AIFF, etc.)                                                          |
-| Output format     | **Passthrough for MP3/M4A** (keep original format via `-c copy`). All other inputs → lossless `.wav` or `.flac` (user picks in save dialog). |
-| Regions           | Multiple draggable regions on a single waveform; each can be cut independently                                                               |
-| Merge sources     | Clips cut within the app **+** external file imports                                                                                         |
-| Packaging         | electron-builder → Windows installer (NSIS)                                                                                                  |
-| Persistence       | Stateless — no saved settings between sessions                                                                                               |
-| Styling           | Tailwind CSS + shadcn/ui (Radix primitives)                                                                                                  |
-| Bundler           | electron-vite (Vite for both main & renderer)                                                                                                |
-| FFmpeg invocation | User's system-installed FFmpeg via `child_process.execFile`                                                                                  |
+| Topic             | Decision                                                                                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio formats     | All FFmpeg-supported input formats (MP3, WAV, FLAC, OGG, AAC, M4A, WMA, AIFF, etc.)                                                                                               |
+| Output format     | **Default mode:** passthrough for MP3/M4A (`-c copy`) and lossless `.wav`/`.flac` for other inputs. **Optional precise mode:** re-encode selected range for sample-accurate cuts. |
+| Regions           | Multiple draggable regions on a single waveform; each can be cut independently                                                                                                    |
+| Merge sources     | Clips cut within the app **+** external file imports                                                                                                                              |
+| Merge strategy    | If queued clips are stream-compatible, use concat demuxer + `-c copy`; otherwise use `filter_complex concat` and re-encode to WAV/FLAC.                                           |
+| Packaging         | electron-builder → Windows installer (NSIS)                                                                                                                                       |
+| Persistence       | Stateless — no saved settings between sessions                                                                                                                                    |
+| Styling           | Tailwind CSS + shadcn/ui (Radix primitives)                                                                                                                                       |
+| Bundler           | electron-vite (Vite for both main & renderer)                                                                                                                                     |
+| FFmpeg invocation | User's system-installed FFmpeg via `child_process.execFile`                                                                                                                       |
 
 ---
 
@@ -21,13 +22,13 @@
 ### 1.1 Initialize with electron-vite
 
 ```
-npm create @electron-vite@latest audio-slice -- --template react-ts
+npm create @electron-vite@latest . -- --template react-ts
 ```
 
-This generates:
+This generates the scaffold directly in the current workspace root:
 
 ```
-audio-slice/
+./
 ├── electron.vite.config.ts      # Vite config for main + preload + renderer
 ├── src/
 │   ├── main/                    # Electron main process
@@ -92,14 +93,14 @@ src/main/
 
 ### 2.2 IPC Channels
 
-| Channel             | Direction                  | Payload                                                                               | Purpose                           |
-| ------------------- | -------------------------- | ------------------------------------------------------------------------------------- | --------------------------------- |
-| `ffmpeg:check`      | renderer → main → renderer | — / `{ available: boolean, version: string }`                                         | Startup FFmpeg check              |
-| `dialog:open-audio` | renderer → main → renderer | — / `{ filePaths: string[] }`                                                         | Native open file dialog           |
-| `dialog:save-audio` | renderer → main → renderer | `{ defaultName: string }` / `{ filePath: string }`                                    | Native save dialog (cut output)   |
-| `dialog:save-merge` | renderer → main → renderer | `{ defaultName: string }` / `{ filePath: string }`                                    | Native save dialog (merge output) |
-| `audio:cut`         | renderer → main → renderer | `{ inputPath, startTime, endTime, outputPath, lossless }` / `{ success, outputPath }` | Execute FFmpeg cut                |
-| `audio:merge`       | renderer → main → renderer | `{ filePaths: string[], outputPath: string }` / `{ success, outputPath }`             | Execute FFmpeg merge              |
+| Channel             | Direction                  | Payload                                                                           | Purpose                           |
+| ------------------- | -------------------------- | --------------------------------------------------------------------------------- | --------------------------------- |
+| `ffmpeg:check`      | renderer → main → renderer | — / `{ available: boolean, version: string }`                                     | Startup FFmpeg check              |
+| `dialog:open-audio` | renderer → main → renderer | — / `{ filePaths: string[] }`                                                     | Native open file dialog           |
+| `dialog:save-audio` | renderer → main → renderer | `{ defaultName: string }` / `{ filePath: string }`                                | Native save dialog (cut output)   |
+| `dialog:save-merge` | renderer → main → renderer | `{ defaultName: string }` / `{ filePath: string }`                                | Native save dialog (merge output) |
+| `audio:cut`         | renderer → main → renderer | `{ inputPath, startTime, endTime, outputPath, mode }` / `{ success, outputPath }` | Execute FFmpeg cut                |
+| `audio:merge`       | renderer → main → renderer | `{ filePaths: string[], outputPath: string }` / `{ success, outputPath }`         | Execute FFmpeg merge              |
 
 All IPC uses `ipcMain.handle` / `ipcRenderer.invoke` (promise-based).
 
@@ -123,16 +124,17 @@ The output strategy depends on the input format:
 
 ```bash
 # MP3 / M4A input → stream copy (keep format)
-ffmpeg -i "input.mp3" -ss 12.500 -to 45.000 -c copy "output.mp3"
-ffmpeg -i "input.m4a" -ss 12.500 -to 45.000 -c copy "output.m4a"
+ffmpeg -ss 12.500 -to 45.000 -i "input.mp3" -c copy "output.mp3"
+ffmpeg -ss 12.500 -to 45.000 -i "input.m4a" -c copy "output.m4a"
 
 # Other inputs → lossless re-encode
-ffmpeg -i "input.ogg" -ss 12.500 -to 45.000 -c:a pcm_s16le "output.wav"
-ffmpeg -i "input.aiff" -ss 12.500 -to 45.000 -c:a flac "output.flac"
+ffmpeg -ss 12.500 -to 45.000 -i "input.ogg" -c:a pcm_s16le "output.wav"
+ffmpeg -ss 12.500 -to 45.000 -i "input.aiff" -c:a flac "output.flac"
 ```
 
 - MP3/M4A use `-c copy` (stream copy) — extremely fast, keeps original format.
 - All other formats re-encode to lossless to guarantee quality.
+- Optional "Precise cut" mode can force re-encode for MP3/M4A to avoid packet-boundary trim behavior.
 
 **Merge:**
 
@@ -147,16 +149,33 @@ ffmpeg -i "input.aiff" -ss 12.500 -to 45.000 -c:a flac "output.flac"
    # If all inputs share the same format (e.g. all .mp3) → stream copy
    ffmpeg -f concat -safe 0 -i "merge_list.txt" -c copy "merged.mp3"
 
-   # If mixed formats → re-encode to lossless
-   ffmpeg -f concat -safe 0 -i "merge_list.txt" -c:a pcm_s16le "merged.wav"
+   # If mixed formats/codecs/sample rates → use filter graph concat and re-encode
+   ffmpeg -i "clip1.wav" -i "clip2.mp3" -filter_complex "[0:a][1:a]concat=n=2:v=0:a=1[outa]" -map "[outa]" -c:a pcm_s16le "merged.wav"
    ```
 
 3. Delete `merge_list.txt` in `finally` block.
 
 - When all queued files are the same MP3/M4A format, use `-c copy` to preserve the original format.
-- When formats are mixed, re-encode everything to a common lossless format (WAV/FLAC).
+- When formats are mixed, use filter-based concat and re-encode everything to a common lossless format (WAV/FLAC).
+- For concat list files, escape single quotes in paths (`'` → `'\''`) and write UTF-8 text.
+- Preflight with `ffprobe` to determine codec/channel/sample-rate compatibility before selecting merge path.
 
 **Security:** Use `execFile` (not `exec`) to prevent shell injection. Validate all file paths. Sanitize input — never interpolate user strings into a shell command.
+
+### 2.5 Validation Rules (Main Process)
+
+- `audio:cut`
+  - `inputPath` exists and is a file.
+  - `startTime >= 0`, `endTime > startTime`, and duration `>= 0.05s`.
+  - `outputPath` directory exists and extension is allowed for selected mode.
+- `audio:merge`
+  - At least 2 files in queue.
+  - Every path exists and is a file.
+  - No duplicate paths after normalization.
+  - Output extension matches selected merge mode (copy or re-encode).
+- Dialog validation
+  - Reject empty/canceled paths.
+  - Normalize to absolute paths before execution.
 
 ### 2.4 Window configuration
 
@@ -200,6 +219,7 @@ interface CutParams {
   startTime: number; // seconds
   endTime: number; // seconds
   outputPath: string;
+  mode?: "copy" | "precise";
 }
 
 interface MergeParams {
@@ -317,7 +337,11 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 1. User selects a region (click on waveform region or RegionList item)
 2. CutPanel shows: `Start: 00:12.500 | End: 00:45.000 | Duration: 32.500s`
 3. User clicks "Cut & Save"
-4. Save dialog opens → user picks name + format (`.wav` / `.flac`)
+4. Save dialog opens:
+
+- MP3/M4A source: default keep source extension (optional precise re-encode mode if enabled)
+- Other sources: user picks `.wav` or `.flac`
+
 5. IPC call → FFmpeg processes → Toast notification on success
 6. Option to "Add to merge queue" appears on success
 
@@ -359,7 +383,7 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 - [ ] Build `RegionList` — display all regions with formatted timestamps
 - [ ] Build `CutPanel` — show selected region details + "Cut & Save" button
 - [ ] Implement `dialog:save-audio` IPC handler
-- [ ] Implement `audio:cut` IPC handler (FFmpeg re-encode to lossless)
+- [ ] Implement `audio:cut` IPC handler (default passthrough for MP3/M4A + precise mode toggle)
 - [ ] Wire up full cut flow: select region → cut → save → toast notification
 - [ ] Add "Add to merge queue" action on successful cut
 
@@ -370,7 +394,7 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 - [ ] Implement drag-and-drop reordering in merge queue
 - [ ] Build `MergeItem` component (file name, remove button, drag handle)
 - [ ] Implement `dialog:save-merge` IPC handler
-- [ ] Implement `audio:merge` IPC handler (temp file → FFmpeg concat → cleanup)
+- [ ] Implement `audio:merge` IPC handler (compatibility preflight → concat demuxer copy or filter-concat re-encode)
 - [ ] Wire up merge flow end-to-end with toast notifications
 
 ### Phase 5: Polish & Packaging
@@ -378,6 +402,7 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 - [ ] Error handling: FFmpeg failures surface as user-friendly toasts
 - [ ] Loading states: disable buttons + show spinner during processing
 - [ ] Edge cases: empty regions, 0-duration selections, duplicate merge items
+- [ ] Main-process payload validation rules enforced for all IPC write operations
 - [ ] Keyboard shortcuts: Space = play/pause, Delete = remove selected region
 - [ ] Configure electron-builder for Windows (NSIS installer)
 - [ ] App icon + metadata (name, version, description)
@@ -442,10 +467,10 @@ import RegionsPlugin from "wavesurfer.js/dist/plugins/regions";
 
 ## 9. Security Checklist
 
-- [x] `contextIsolation: true` in webPreferences
-- [x] `nodeIntegration: false` in webPreferences
-- [x] All FFmpeg calls via `execFile` (no shell interpolation)
-- [x] File paths validated before passing to FFmpeg
-- [x] Temp files created in `os.tmpdir()` and cleaned up in `finally`
-- [x] No remote content loaded — all local
-- [x] IPC channels use `handle`/`invoke` pattern (not `send`/`on` for sensitive ops)
+- [ ] `contextIsolation: true` in webPreferences
+- [ ] `nodeIntegration: false` in webPreferences
+- [ ] All FFmpeg calls via `execFile` (no shell interpolation)
+- [ ] File paths validated before passing to FFmpeg
+- [ ] Temp files created in `os.tmpdir()` and cleaned up in `finally`
+- [ ] No remote content loaded — all local
+- [ ] IPC channels use `handle`/`invoke` pattern (not `send`/`on` for sensitive ops)
