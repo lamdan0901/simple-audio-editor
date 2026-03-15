@@ -12,7 +12,8 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
-import { stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { loadSettings, saveSettings, type AppSettings } from "./settings";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,6 +47,7 @@ const WINDOW_ICON_PATH = existsSync(APP_ICON_PATH)
   : FALLBACK_ICON_PATH;
 
 let win: BrowserWindow | null;
+let appSettings: AppSettings = { defaultOutputFolder: null };
 
 type FfmpegCheckResult = {
   available: boolean;
@@ -64,10 +66,12 @@ type SaveAudioDialogPayload = {
   defaultName?: string;
   inputExtension?: string;
   mode?: "copy" | "precise";
+  forceDialog?: boolean;
 };
 
 type SaveMergeDialogPayload = {
   defaultName?: string;
+  forceDialog?: boolean;
 };
 
 type MergePayload = {
@@ -138,6 +142,15 @@ async function ensureDirectoryExists(filePath: string): Promise<void> {
   const target = await stat(parentDir);
   if (!target.isDirectory()) {
     throw new Error("Output directory does not exist.");
+  }
+}
+
+async function isExistingDirectory(folderPath: string): Promise<boolean> {
+  try {
+    const target = await stat(folderPath);
+    return target.isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -374,7 +387,12 @@ function sanitizeDefaultName(value: unknown, fallback: string): string {
   }
 
   const basenameOnly = path.basename(trimmed);
-  const noControlChars = basenameOnly.replace(/[\u0000-\u001F\u007F]/g, "");
+  const noControlChars = [...basenameOnly]
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return code >= 0x20 && code !== 0x7f;
+    })
+    .join("");
   const safe = noControlChars.trim();
   return safe || fallback;
 }
@@ -383,7 +401,7 @@ function validateSaveAudioDialogPayload(
   payload: unknown,
 ): SaveAudioDialogPayload {
   if (payload == null) {
-    return { defaultName: "clip.wav" };
+    return { defaultName: "clip.wav", forceDialog: false };
   }
 
   if (typeof payload !== "object") {
@@ -396,10 +414,18 @@ function validateSaveAudioDialogPayload(
     throw new Error("save-audio mode must be either copy or precise.");
   }
 
+  if (
+    candidate.forceDialog != null &&
+    typeof candidate.forceDialog !== "boolean"
+  ) {
+    throw new Error("save-audio forceDialog must be a boolean.");
+  }
+
   return {
     defaultName: sanitizeDefaultName(candidate.defaultName, "clip.wav"),
     inputExtension: normalizeExtension(candidate.inputExtension),
     mode,
+    forceDialog: candidate.forceDialog ?? false,
   };
 }
 
@@ -407,7 +433,7 @@ function validateSaveMergeDialogPayload(
   payload: unknown,
 ): SaveMergeDialogPayload {
   if (payload == null) {
-    return { defaultName: "merged.wav" };
+    return { defaultName: "merged.wav", forceDialog: false };
   }
 
   if (typeof payload !== "object") {
@@ -416,8 +442,16 @@ function validateSaveMergeDialogPayload(
 
   const candidate = payload as Partial<SaveMergeDialogPayload>;
 
+  if (
+    candidate.forceDialog != null &&
+    typeof candidate.forceDialog !== "boolean"
+  ) {
+    throw new Error("save-merge forceDialog must be a boolean.");
+  }
+
   return {
     defaultName: sanitizeDefaultName(candidate.defaultName, "merged.wav"),
+    forceDialog: candidate.forceDialog ?? false,
   };
 }
 
@@ -571,6 +605,22 @@ function checkFfmpeg(): Promise<FfmpegCheckResult> {
 
 function registerIpcHandlers() {
   ipcMain.handle("ffmpeg:check", () => checkFfmpeg());
+  ipcMain.handle("audio:read-file", async (_event, payload: unknown) => {
+    if (typeof payload !== "string" || payload.trim().length === 0) {
+      throw new Error("A valid file path is required.");
+    }
+
+    const targetPath = toAbsolutePath(payload);
+    await ensureFile(targetPath);
+    const bytes = await readFile(targetPath);
+
+    const byteOffset = bytes.byteOffset;
+    const byteLength = bytes.byteLength;
+    const arrayBuffer = bytes.buffer.slice(byteOffset, byteOffset + byteLength);
+
+    return { arrayBuffer };
+  });
+
   ipcMain.handle("dialog:open-audio", async () => {
     const options: OpenDialogOptions = {
       title: "Select Audio File",
@@ -599,6 +649,61 @@ function registerIpcHandlers() {
     };
   });
 
+  ipcMain.handle("dialog:select-output-folder", async () => {
+    const options: OpenDialogOptions = {
+      title: "Select Default Output Folder",
+      properties: ["openDirectory", "createDirectory"],
+    };
+
+    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
+    const result = browserWindow
+      ? await dialog.showOpenDialog(browserWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { folderPath: undefined };
+    }
+
+    return {
+      folderPath: toAbsolutePath(result.filePaths[0]),
+    };
+  });
+
+  ipcMain.handle("settings:get-default-output-folder", () => {
+    return { folderPath: appSettings.defaultOutputFolder ?? undefined };
+  });
+
+  ipcMain.handle(
+    "settings:set-default-output-folder",
+    async (_event, payload: unknown) => {
+      if (typeof payload !== "string" || payload.trim().length === 0) {
+        throw new Error("A valid output folder path is required.");
+      }
+
+      const folderPath = toAbsolutePath(payload);
+      const exists = await isExistingDirectory(folderPath);
+      if (!exists) {
+        throw new Error("Selected output folder does not exist.");
+      }
+
+      appSettings = {
+        ...appSettings,
+        defaultOutputFolder: folderPath,
+      };
+      await saveSettings(appSettings);
+      return { folderPath };
+    },
+  );
+
+  ipcMain.handle("settings:clear-default-output-folder", async () => {
+    appSettings = {
+      ...appSettings,
+      defaultOutputFolder: null,
+    };
+    await saveSettings(appSettings);
+    return { success: true };
+  });
+
   ipcMain.handle("dialog:save-audio", async (_event, payload: unknown) => {
     const validated = validateSaveAudioDialogPayload(payload);
     const requestedDefaultName = validated.defaultName ?? "clip.wav";
@@ -612,9 +717,23 @@ function registerIpcHandlers() {
       filters,
     );
 
+    const savedFolder = appSettings.defaultOutputFolder;
+    const hasSavedFolder =
+      typeof savedFolder === "string" &&
+      savedFolder.length > 0 &&
+      (await isExistingDirectory(savedFolder));
+
+    if (!validated.forceDialog && hasSavedFolder) {
+      return {
+        filePath: toAbsolutePath(path.join(savedFolder, defaultName)),
+      };
+    }
+
     const options: SaveDialogOptions = {
       title: "Save Cut Audio",
-      defaultPath: defaultName,
+      defaultPath: hasSavedFolder
+        ? path.join(savedFolder, defaultName)
+        : defaultName,
       filters,
     };
 
@@ -625,6 +744,15 @@ function registerIpcHandlers() {
 
     if (result.canceled || !result.filePath) {
       return { filePath: undefined };
+    }
+
+    const selectedFolder = path.dirname(result.filePath);
+    if (selectedFolder !== appSettings.defaultOutputFolder) {
+      appSettings = {
+        ...appSettings,
+        defaultOutputFolder: selectedFolder,
+      };
+      await saveSettings(appSettings).catch(() => undefined);
     }
 
     return { filePath: toAbsolutePath(result.filePath) };
@@ -640,9 +768,23 @@ function registerIpcHandlers() {
       filters,
     );
 
+    const savedFolder = appSettings.defaultOutputFolder;
+    const hasSavedFolder =
+      typeof savedFolder === "string" &&
+      savedFolder.length > 0 &&
+      (await isExistingDirectory(savedFolder));
+
+    if (!validated.forceDialog && hasSavedFolder) {
+      return {
+        filePath: toAbsolutePath(path.join(savedFolder, defaultName)),
+      };
+    }
+
     const options: SaveDialogOptions = {
       title: "Save Merged Audio",
-      defaultPath: defaultName,
+      defaultPath: hasSavedFolder
+        ? path.join(savedFolder, defaultName)
+        : defaultName,
       filters,
     };
 
@@ -653,6 +795,15 @@ function registerIpcHandlers() {
 
     if (result.canceled || !result.filePath) {
       return { filePath: undefined };
+    }
+
+    const selectedFolder = path.dirname(result.filePath);
+    if (selectedFolder !== appSettings.defaultOutputFolder) {
+      appSettings = {
+        ...appSettings,
+        defaultOutputFolder: selectedFolder,
+      };
+      await saveSettings(appSettings).catch(() => undefined);
     }
 
     return { filePath: toAbsolutePath(result.filePath) };
@@ -839,7 +990,8 @@ app.on("activate", () => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  appSettings = await loadSettings();
   registerIpcHandlers();
   createWindow();
 });

@@ -25,13 +25,24 @@ declare namespace NodeJS {
 interface Window {
   api: {
     checkFfmpeg: () => Promise<{ available: boolean; version: string }>;
+    readAudioFile: (filePath: string) => Promise<{ arrayBuffer: ArrayBuffer }>;
     openAudioFile: () => Promise<{ filePaths: string[] }>;
+    selectOutputFolder: () => Promise<{ folderPath?: string }>;
+    getDefaultOutputFolder: () => Promise<{ folderPath?: string }>;
+    setDefaultOutputFolder: (
+      folderPath: string,
+    ) => Promise<{ folderPath: string }>;
+    clearDefaultOutputFolder: () => Promise<{ success: boolean }>;
     saveAudioFile: (params: {
       defaultName: string;
       inputExtension?: string;
       mode?: "copy" | "precise";
+      forceDialog?: boolean;
     }) => Promise<{ filePath?: string }>;
-    saveMergeFile: (defaultName: string) => Promise<{ filePath?: string }>;
+    saveMergeFile: (params: {
+      defaultName: string;
+      forceDialog?: boolean;
+    }) => Promise<{ filePath?: string }>;
     cutAudio: (params: {
       inputPath: string;
       startTime: number;

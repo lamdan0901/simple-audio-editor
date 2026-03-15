@@ -9,6 +9,7 @@ type MergePanelProps = {
   isProcessing: boolean;
   onImportFiles: () => Promise<void>;
   onMergeAll: () => Promise<void>;
+  onMergeAllAs: () => Promise<void>;
   onRemoveItem: (itemId: string) => void;
   onReorderItems: (sourceId: string, targetId: string) => void;
 };
@@ -18,6 +19,7 @@ export function MergePanel({
   isProcessing,
   onImportFiles,
   onMergeAll,
+  onMergeAllAs,
   onRemoveItem,
   onReorderItems,
 }: MergePanelProps) {
@@ -78,6 +80,17 @@ export function MergePanel({
             <Sparkles className="size-3.5" />
           )}
           {isProcessing ? "Merging..." : "Merge All"}
+        </Button>
+
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={isProcessing || items.length < 2}
+          onClick={onMergeAllAs}
+        >
+          <Sparkles className="size-3.5" />
+          Merge As...
         </Button>
       </div>
 

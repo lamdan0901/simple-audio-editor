@@ -1,15 +1,21 @@
-import { Loader2, Scissors, Sparkles } from "lucide-react";
+import { Loader2, Scissors, Sparkles, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { WaveformRegion } from "@/hooks/useWaveSurfer";
 
 type CutPanelProps = {
+  audioFilePath: string | null;
+  isSelectingAudio: boolean;
+  selectAudioError: string | null;
+  onSelectAudio: () => Promise<void>;
   selectedRegion: WaveformRegion | null;
+  selectedCount: number;
   disabled: boolean;
   isProcessing: boolean;
   preciseMode: boolean;
   onPreciseModeChange: (enabled: boolean) => void;
   onCutAndSave: () => Promise<void>;
+  onCutAndSaveAs: () => Promise<void>;
   onAddToMergeQueue: () => void;
   canAddToMergeQueue: boolean;
   addedCount: number;
@@ -28,12 +34,18 @@ function formatTime(valueInSeconds: number): string {
 }
 
 export function CutPanel({
+  audioFilePath,
+  isSelectingAudio,
+  selectAudioError,
+  onSelectAudio,
   selectedRegion,
+  selectedCount,
   disabled,
   isProcessing,
   preciseMode,
   onPreciseModeChange,
   onCutAndSave,
+  onCutAndSaveAs,
   onAddToMergeQueue,
   canAddToMergeQueue,
   addedCount,
@@ -44,6 +56,36 @@ export function CutPanel({
 
   return (
     <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/70 p-4">
+      <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            disabled={isSelectingAudio || isProcessing}
+            onClick={onSelectAudio}
+          >
+            {isSelectingAudio ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Upload className="size-4" />
+            )}
+            {isSelectingAudio ? "Opening..." : "Select Audio File"}
+          </Button>
+        </div>
+        <p
+          className="mt-2 truncate text-xs text-zinc-300"
+          title={audioFilePath ?? ""}
+        >
+          {audioFilePath
+            ? `Loaded: ${audioFilePath.split(/[/\\]/).pop() ?? audioFilePath}`
+            : "Loaded: No file"}
+        </p>
+        {selectAudioError ? (
+          <p className="mt-1 text-xs text-red-300">{selectAudioError}</p>
+        ) : null}
+      </div>
+
       <div className="mb-3 flex items-center gap-2 text-zinc-300">
         <Scissors className="size-4 text-emerald-400" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.2em]">
@@ -58,6 +100,10 @@ export function CutPanel({
             {formatTime(selectedRegion.end)}
           </p>
           <p className="mt-1 text-zinc-400">Duration: {duration.toFixed(3)}s</p>
+          <p className="mt-1 text-zinc-400">
+            Selected for export: {selectedCount} region
+            {selectedCount > 1 ? "s" : ""}
+          </p>
         </div>
       ) : (
         <p className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-3 text-sm text-zinc-400">
@@ -85,7 +131,8 @@ export function CutPanel({
         <Button
           type="button"
           size="lg"
-          disabled={disabled || isProcessing || !selectedRegion}
+          className="enabled:bg-white enabled:text-black enabled:hover:bg-zinc-200"
+          disabled={disabled || isProcessing || selectedCount === 0}
           onClick={onCutAndSave}
         >
           {isProcessing ? (
@@ -93,13 +140,26 @@ export function CutPanel({
           ) : (
             <Scissors className="size-4" />
           )}
-          {isProcessing ? "Cutting..." : "Cut & Save"}
+          {isProcessing ? "Saving..." : "Save"}
+        </Button>
+
+        <Button
+          type="button"
+          size="lg"
+          variant="outline"
+          className="enabled:border-zinc-900 enabled:bg-black enabled:text-white enabled:hover:bg-zinc-800"
+          disabled={disabled || isProcessing || selectedCount === 0}
+          onClick={onCutAndSaveAs}
+        >
+          <Scissors className="size-4" />
+          Save As...
         </Button>
 
         <Button
           type="button"
           size="lg"
           variant="secondary"
+          className="enabled:bg-black enabled:text-white enabled:hover:bg-zinc-800"
           disabled={!canAddToMergeQueue || isProcessing}
           onClick={onAddToMergeQueue}
         >

@@ -6,7 +6,11 @@ import type { WaveformRegion } from "@/hooks/useWaveSurfer";
 type RegionListProps = {
   regions: WaveformRegion[];
   selectedRegionId: string | null;
+  selectedRegionIds: string[];
   onSelectRegion: (regionId: string) => void;
+  onToggleRegionSelection: (regionId: string) => void;
+  onSelectAllRegions: () => void;
+  onClearRegionSelection: () => void;
   onPlayRegion: (regionId: string) => void;
   onDeleteRegion: (regionId: string) => void;
 };
@@ -26,10 +30,16 @@ function formatTime(valueInSeconds: number): string {
 export function RegionList({
   regions,
   selectedRegionId,
+  selectedRegionIds,
   onSelectRegion,
+  onToggleRegionSelection,
+  onSelectAllRegions,
+  onClearRegionSelection,
   onPlayRegion,
   onDeleteRegion,
 }: RegionListProps) {
+  const selectedSet = new Set(selectedRegionIds);
+
   return (
     <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/70 p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -42,6 +52,30 @@ export function RegionList({
         <p className="text-xs text-zinc-400">{regions.length} total</p>
       </div>
 
+      <div className="mb-3 flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={onSelectAllRegions}
+          disabled={regions.length === 0}
+        >
+          Select All
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onClearRegionSelection}
+          disabled={selectedRegionIds.length === 0}
+        >
+          Clear
+        </Button>
+        <p className="text-xs text-zinc-400">
+          {selectedRegionIds.length} selected for cut
+        </p>
+      </div>
+
       {regions.length === 0 ? (
         <p className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-4 text-sm text-zinc-400">
           Drag on the waveform to create one or more regions.
@@ -50,17 +84,35 @@ export function RegionList({
         <div className="space-y-2">
           {regions.map((region, index) => {
             const duration = Math.max(0, region.end - region.start);
-            const selected = region.id === selectedRegionId;
+            const active = region.id === selectedRegionId;
+            const selectedForCut = selectedSet.has(region.id);
 
             return (
               <div
                 key={region.id}
                 className={`rounded-lg border px-3 py-2 transition ${
-                  selected
+                  active
                     ? "border-emerald-500/60 bg-emerald-900/20"
                     : "border-zinc-800 bg-zinc-950/70"
                 }`}
               >
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-emerald-500"
+                      checked={selectedForCut}
+                      onChange={() => onToggleRegionSelection(region.id)}
+                    />
+                    Select for cut
+                  </label>
+                  {active ? (
+                    <span className="text-xs uppercase tracking-[0.12em] text-emerald-300">
+                      Active
+                    </span>
+                  ) : null}
+                </div>
+
                 <button
                   type="button"
                   onClick={() => onSelectRegion(region.id)}

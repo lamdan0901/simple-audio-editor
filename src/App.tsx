@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Loader2, Upload } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
 import { CutPanel } from "@/components/cut/CutPanel";
@@ -6,6 +7,7 @@ import { TopBar } from "@/components/layout/TopBar";
 import { MergePanel } from "@/components/merge/MergePanel";
 import type { MergeQueueItem } from "@/components/merge/MergeItem";
 import { RegionList } from "@/components/regions/RegionList";
+import { Button } from "@/components/ui/button";
 import { TransportControls } from "@/components/waveform/TransportControls";
 import { WaveformPlayer } from "@/components/waveform/WaveformPlayer";
 import { useWaveSurfer } from "@/hooks/useWaveSurfer";
@@ -15,6 +17,8 @@ type FfmpegState = {
   available: boolean;
   version: string;
 };
+
+type WorkspaceTab = "cutter" | "merger";
 
 const MIN_CUT_DURATION_SECONDS = 0.05;
 
@@ -30,33 +34,57 @@ function App() {
   const [selectAudioError, setSelectAudioError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [preciseCutMode, setPreciseCutMode] = useState(false);
-  const [lastCutPath, setLastCutPath] = useState<string | null>(null);
+  const [selectedRegionIds, setSelectedRegionIds] = useState<string[]>([]);
+  const [lastCutPaths, setLastCutPaths] = useState<string[]>([]);
   const [mergeQueue, setMergeQueue] = useState<MergeQueueItem[]>([]);
-
-  const audioUrl = useMemo(() => toFileUrl(audioFilePath), [audioFilePath]);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("cutter");
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [defaultOutputFolder, setDefaultOutputFolder] = useState<string | null>(
+    null,
+  );
+  const [isUpdatingOutputFolder, setIsUpdatingOutputFolder] = useState(false);
 
   const {
     containerRef,
     isReady,
     isLoading,
     isPlaying,
+    volume,
     duration,
     currentTime,
     error,
     regions,
     selectedRegionId,
+    hoveredRegionId,
+    regionContextMenu,
     play,
     pause,
     stop,
+    setVolume,
     selectRegion,
     playRegion,
     removeRegion,
-  } = useWaveSurfer(audioUrl);
+    closeRegionContextMenu,
+    previewRegionFromContextMenu,
+    deleteRegionFromContextMenu,
+  } = useWaveSurfer(
+    audioBlob,
+    ffmpeg.loading ? "ffmpeg-loading" : "ffmpeg-ready",
+  );
 
   const selectedRegion = useMemo(
     () => regions.find((region) => region.id === selectedRegionId) ?? null,
     [regions, selectedRegionId],
   );
+
+  const selectedRegions = useMemo(() => {
+    if (selectedRegionIds.length === 0) {
+      return [];
+    }
+
+    const selectedIds = new Set(selectedRegionIds);
+    return regions.filter((region) => selectedIds.has(region.id));
+  }, [regions, selectedRegionIds]);
 
   const statusText = useMemo(() => {
     if (ffmpeg.loading) return "Checking FFmpeg...";
@@ -88,8 +116,129 @@ function App() {
   }, []);
 
   useEffect(() => {
-    setLastCutPath(null);
+    let active = true;
+
+    window.api
+      .getDefaultOutputFolder()
+      .then((result) => {
+        if (!active) {
+          return;
+        }
+
+        setDefaultOutputFolder(result.folderPath ?? null);
+      })
+      .catch(() => {
+        if (!active) {
+          return;
+        }
+
+        setDefaultOutputFolder(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setLastCutPaths([]);
+    setSelectedRegionIds([]);
   }, [audioFilePath]);
+
+  useEffect(() => {
+    setSelectedRegionIds((current) => {
+      const validRegionIds = new Set(regions.map((region) => region.id));
+      const next = current.filter((regionId) => validRegionIds.has(regionId));
+
+      if (selectedRegionId && validRegionIds.has(selectedRegionId)) {
+        if (!next.includes(selectedRegionId)) {
+          next.push(selectedRegionId);
+        }
+      }
+
+      if (
+        next.length === current.length &&
+        next.every((value, index) => value === current[index])
+      ) {
+        return current;
+      }
+
+      return next;
+    });
+  }, [regions, selectedRegionId]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    if (!audioFilePath) {
+      setAudioBlob(null);
+      return;
+    }
+
+    const loadSelectedAudio = async () => {
+      try {
+        const readResult = await window.api.readAudioFile(audioFilePath);
+        if (
+          !readResult?.arrayBuffer ||
+          readResult.arrayBuffer.byteLength === 0
+        ) {
+          throw new Error("Selected file appears to be empty.");
+        }
+
+        const blob = new Blob([readResult.arrayBuffer], {
+          type: guessAudioMimeType(audioFilePath),
+        });
+
+        if (canceled) {
+          return;
+        }
+
+        setAudioBlob(blob);
+      } catch (err) {
+        if (canceled) {
+          return;
+        }
+
+        setAudioBlob(null);
+        toast.error("Unable to read selected audio", {
+          description: getUserFacingError(err),
+        });
+      }
+    };
+
+    void loadSelectedAudio();
+
+    return () => {
+      canceled = true;
+    };
+  }, [audioFilePath]);
+
+  useEffect(() => {
+    if (!audioFilePath || !error) {
+      return;
+    }
+
+    toast.error("Unable to load selected audio", {
+      description: error,
+    });
+  }, [audioFilePath, error]);
+
+  useEffect(() => {
+    if (!audioFilePath || !isLoading || isReady || error) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      toast.error("Waveform is still loading", {
+        description:
+          "Try another file format (WAV/MP3), then share the exact file type if this keeps happening.",
+      });
+    }, 8000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [audioFilePath, error, isLoading, isReady]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -97,7 +246,7 @@ function App() {
         return;
       }
 
-      if (event.code === "Space") {
+      if (activeTab === "cutter" && event.code === "Space") {
         event.preventDefault();
         if (!isReady) {
           return;
@@ -116,7 +265,11 @@ function App() {
         return;
       }
 
-      if (event.key === "Delete" && selectedRegionId) {
+      if (
+        activeTab === "cutter" &&
+        event.key === "Delete" &&
+        selectedRegionId
+      ) {
         event.preventDefault();
         removeRegion(selectedRegionId);
       }
@@ -126,7 +279,15 @@ function App() {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isPlaying, isReady, pause, play, removeRegion, selectedRegionId]);
+  }, [
+    activeTab,
+    isPlaying,
+    isReady,
+    pause,
+    play,
+    removeRegion,
+    selectedRegionId,
+  ]);
 
   const handleSelectAudio = async () => {
     setIsSelectingAudio(true);
@@ -140,6 +301,11 @@ function App() {
       }
 
       setAudioFilePath(firstPath);
+      setActiveTab("cutter");
+      toast.success("Audio loaded", {
+        description:
+          "Switched to Audio Cutter. Click the waveform to create a cut region.",
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setSelectAudioError(`Unable to open audio file picker: ${message}`);
@@ -151,7 +317,48 @@ function App() {
     }
   };
 
-  const handleCutAndSave = async () => {
+  const handleSetDefaultOutputFolder = async () => {
+    setIsUpdatingOutputFolder(true);
+
+    try {
+      const pickResult = await window.api.selectOutputFolder();
+      if (!pickResult.folderPath) {
+        return;
+      }
+
+      const setResult = await window.api.setDefaultOutputFolder(
+        pickResult.folderPath,
+      );
+      setDefaultOutputFolder(setResult.folderPath);
+      toast.success("Default output folder updated", {
+        description: setResult.folderPath,
+      });
+    } catch (err) {
+      toast.error("Unable to set default output folder", {
+        description: getUserFacingError(err),
+      });
+    } finally {
+      setIsUpdatingOutputFolder(false);
+    }
+  };
+
+  const handleClearDefaultOutputFolder = async () => {
+    setIsUpdatingOutputFolder(true);
+
+    try {
+      await window.api.clearDefaultOutputFolder();
+      setDefaultOutputFolder(null);
+      toast.message("Default output folder cleared");
+    } catch (err) {
+      toast.error("Unable to clear default output folder", {
+        description: getUserFacingError(err),
+      });
+    } finally {
+      setIsUpdatingOutputFolder(false);
+    }
+  };
+
+  const handleCutAndSave = async (forceDialog: boolean = false) => {
     if (!audioFilePath) {
       toast.error("No source file selected", {
         description: "Choose an audio file before cutting.",
@@ -159,20 +366,9 @@ function App() {
       return;
     }
 
-    if (!selectedRegion) {
+    if (selectedRegions.length === 0) {
       toast.error("No region selected", {
-        description: "Create or select a region before cutting.",
-      });
-      return;
-    }
-
-    const cutDuration = selectedRegion.end - selectedRegion.start;
-    if (
-      !Number.isFinite(cutDuration) ||
-      cutDuration < MIN_CUT_DURATION_SECONDS
-    ) {
-      toast.error("Region is too short", {
-        description: `Minimum duration is ${MIN_CUT_DURATION_SECONDS.toFixed(2)}s.`,
+        description: "Create or select at least one region before cutting.",
       });
       return;
     }
@@ -184,37 +380,98 @@ function App() {
       !preciseCutMode
         ? sourceExtension
         : ".wav";
-    const defaultName = `${baseName}_${selectedRegion.start.toFixed(3)}-${selectedRegion.end.toFixed(3)}${defaultExtension}`;
+    const invalidRegion = selectedRegions.find((region) => {
+      const cutDuration = region.end - region.start;
+      return (
+        !Number.isFinite(cutDuration) || cutDuration < MIN_CUT_DURATION_SECONDS
+      );
+    });
+    if (invalidRegion) {
+      toast.error("Region is too short", {
+        description: `Minimum duration is ${MIN_CUT_DURATION_SECONDS.toFixed(2)}s.`,
+      });
+      return;
+    }
+
+    const defaultName = `${baseName}_${selectedRegions[0].start.toFixed(3)}-${selectedRegions[0].end.toFixed(3)}${defaultExtension}`;
 
     setIsProcessing(true);
 
     try {
-      const saveResult = await window.api.saveAudioFile({
-        defaultName,
-        inputExtension: sourceExtension,
-        mode: preciseCutMode ? "precise" : "copy",
-      });
-      if (!saveResult.filePath) {
-        toast.message("Cut canceled");
+      if (selectedRegions.length === 1) {
+        const selectedRegion = selectedRegions[0];
+        const saveResult = await window.api.saveAudioFile({
+          defaultName,
+          inputExtension: sourceExtension,
+          mode: preciseCutMode ? "precise" : "copy",
+          forceDialog,
+        });
+        if (!saveResult.filePath) {
+          toast.message("Cut canceled");
+          return;
+        }
+
+        const cutResult = await window.api.cutAudio({
+          inputPath: audioFilePath,
+          startTime: selectedRegion.start,
+          endTime: selectedRegion.end,
+          outputPath: saveResult.filePath,
+          mode: preciseCutMode ? "precise" : "copy",
+        });
+
+        if (!cutResult.success) {
+          throw new Error("Audio cutting failed.");
+        }
+
+        const outputPath = cutResult.outputPath ?? saveResult.filePath;
+        setLastCutPaths([outputPath]);
+        toast.success("Cut completed", {
+          description: getFileName(outputPath),
+        });
         return;
       }
 
-      const cutResult = await window.api.cutAudio({
-        inputPath: audioFilePath,
-        startTime: selectedRegion.start,
-        endTime: selectedRegion.end,
-        outputPath: saveResult.filePath,
-        mode: preciseCutMode ? "precise" : "copy",
-      });
+      let outputFolder = defaultOutputFolder;
 
-      if (!cutResult.success) {
-        throw new Error("Audio cutting failed.");
+      if (forceDialog || !outputFolder) {
+        const pickResult = await window.api.selectOutputFolder();
+        if (!pickResult.folderPath) {
+          toast.message("Cut canceled");
+          return;
+        }
+
+        outputFolder = pickResult.folderPath;
+        setDefaultOutputFolder(outputFolder);
+        await window.api
+          .setDefaultOutputFolder(outputFolder)
+          .catch(() => undefined);
       }
 
-      const outputPath = cutResult.outputPath ?? saveResult.filePath;
-      setLastCutPath(outputPath);
-      toast.success("Cut completed", {
-        description: getFileName(outputPath),
+      const createdPaths: string[] = [];
+
+      for (let index = 0; index < selectedRegions.length; index += 1) {
+        const region = selectedRegions[index];
+        const outputName = `${baseName}_${String(index + 1).padStart(3, "0")}_${region.start.toFixed(3)}-${region.end.toFixed(3)}${defaultExtension}`;
+        const outputPath = joinPath(outputFolder, outputName);
+
+        const cutResult = await window.api.cutAudio({
+          inputPath: audioFilePath,
+          startTime: region.start,
+          endTime: region.end,
+          outputPath,
+          mode: preciseCutMode ? "precise" : "copy",
+        });
+
+        if (!cutResult.success) {
+          throw new Error(`Audio cutting failed for region ${index + 1}.`);
+        }
+
+        createdPaths.push(cutResult.outputPath ?? outputPath);
+      }
+
+      setLastCutPaths(createdPaths);
+      toast.success("Batch cut completed", {
+        description: `${createdPaths.length} clips saved`,
       });
     } catch (err) {
       toast.error("Failed to cut audio", {
@@ -226,11 +483,43 @@ function App() {
   };
 
   const handleAddLastCutToMergeQueue = () => {
-    if (!lastCutPath) {
+    if (lastCutPaths.length === 0) {
       return;
     }
 
-    addToMergeQueue(lastCutPath, "cut");
+    let addedCount = 0;
+    for (const cutPath of lastCutPaths) {
+      const wasAdded = addToMergeQueue(cutPath, "cut", false);
+      if (wasAdded) {
+        addedCount += 1;
+      }
+    }
+
+    if (addedCount > 0) {
+      toast.success("Clips added to merge queue", {
+        description: `${addedCount} clip${addedCount > 1 ? "s" : ""} added`,
+      });
+    } else {
+      toast.message("All cut clips are already in merge queue");
+    }
+  };
+
+  const handleToggleRegionSelection = (regionId: string) => {
+    setSelectedRegionIds((current) => {
+      if (current.includes(regionId)) {
+        return current.filter((id) => id !== regionId);
+      }
+
+      return [...current, regionId];
+    });
+  };
+
+  const handleSelectAllRegions = () => {
+    setSelectedRegionIds(regions.map((region) => region.id));
+  };
+
+  const handleClearRegionSelection = () => {
+    setSelectedRegionIds([]);
   };
 
   const handleImportMergeFiles = async () => {
@@ -327,7 +616,64 @@ function App() {
     setIsProcessing(true);
 
     try {
-      const saveResult = await window.api.saveMergeFile(defaultName);
+      const saveResult = await window.api.saveMergeFile({
+        defaultName,
+        forceDialog: false,
+      });
+      if (!saveResult.filePath) {
+        toast.message("Merge canceled");
+        return;
+      }
+
+      const mergeResult = await window.api.mergeAudio({
+        filePaths: mergePaths,
+        outputPath: saveResult.filePath,
+      });
+
+      if (!mergeResult.success) {
+        throw new Error("Audio merge failed.");
+      }
+
+      const outputPath = mergeResult.outputPath ?? saveResult.filePath;
+      toast.success("Merge completed", {
+        description: getFileName(outputPath),
+      });
+    } catch (err) {
+      toast.error("Failed to merge audio", {
+        description: getUserFacingError(err),
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleMergeAllAs = async () => {
+    if (mergeQueue.length < 2) {
+      toast.error("Need at least two files to merge");
+      return;
+    }
+
+    const uniqueMergePaths = new Set(
+      mergeQueue.map((item) => normalizeForCompare(item.filePath)),
+    );
+    if (uniqueMergePaths.size !== mergeQueue.length) {
+      toast.error("Merge queue contains duplicate files", {
+        description: "Remove duplicates before merging.",
+      });
+      return;
+    }
+
+    const mergePaths = mergeQueue.map((item) => item.filePath);
+    const outputExtension = suggestMergeOutputExtension(mergePaths);
+    const defaultName = `merged${outputExtension}`;
+
+    setIsProcessing(true);
+
+    try {
+      const saveResult = await window.api.saveMergeFile({
+        defaultName,
+        forceDialog: true,
+      });
       if (!saveResult.filePath) {
         toast.message("Merge canceled");
         return;
@@ -395,7 +741,7 @@ function App() {
         <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-8">
           <section className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900/70 p-8 shadow-2xl">
             <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
-              AudioSlice
+              AudioEditor
             </p>
             <h1 className="mt-3 text-3xl font-semibold">Checking FFmpeg</h1>
             <p className="mt-4 text-zinc-300">
@@ -417,7 +763,7 @@ function App() {
         <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-8">
           <section className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900/70 p-8 shadow-2xl">
             <p className="text-xs uppercase tracking-[0.2em] text-zinc-400">
-              AudioSlice
+              AudioEditor
             </p>
             <h1 className="mt-3 text-3xl font-semibold">FFmpeg is required</h1>
             <p className="mt-4 text-zinc-300">
@@ -441,58 +787,206 @@ function App() {
         <section className="mx-auto flex h-full w-full max-w-6xl flex-col gap-5">
           <TopBar
             statusText={statusText}
-            audioFilePath={audioFilePath}
-            selectError={selectAudioError}
-            isSelecting={isSelectingAudio}
-            onSelectAudio={handleSelectAudio}
+            defaultOutputFolder={defaultOutputFolder}
+            isUpdatingOutputFolder={isUpdatingOutputFolder}
+            onPickOutputFolder={handleSetDefaultOutputFolder}
+            onClearOutputFolder={handleClearDefaultOutputFolder}
           />
 
-          <WaveformPlayer
-            containerRef={containerRef}
-            hasAudio={Boolean(audioFilePath)}
-            isLoading={isLoading}
-            error={error}
-          />
+          <nav
+            className="rounded-2xl border border-zinc-800/90 bg-zinc-900/60 p-2"
+            aria-label="Workspace tabs"
+          >
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab("cutter")}
+                aria-pressed={activeTab === "cutter"}
+                className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
+                  activeTab === "cutter"
+                    ? "border-emerald-400/70 bg-emerald-500/10 text-emerald-100"
+                    : "border-zinc-800 bg-zinc-950/50 text-zinc-200 hover:border-zinc-700 hover:text-zinc-100"
+                }`}
+              >
+                Audio Cutter
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("merger")}
+                aria-pressed={activeTab === "merger"}
+                className={`rounded-xl border px-4 py-2 text-sm font-medium transition ${
+                  activeTab === "merger"
+                    ? "border-emerald-400/70 bg-emerald-500/10 text-emerald-100"
+                    : "border-zinc-800 bg-zinc-950/50 text-zinc-200 hover:border-zinc-700 hover:text-zinc-100"
+                }`}
+              >
+                Audio Merger
+              </button>
+            </div>
+          </nav>
 
-          <TransportControls
-            disabled={!isReady}
-            isPlaying={isPlaying}
-            currentTime={formatTime(currentTime)}
-            duration={formatTime(duration)}
-            onPlay={play}
-            onPause={pause}
-            onStop={stop}
-          />
+          <section
+            className={
+              activeTab === "cutter"
+                ? "flex flex-col gap-4"
+                : "hidden flex-col gap-4"
+            }
+            aria-label="Audio cutter workspace"
+          >
+            {!audioFilePath ? (
+              <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/70 p-6 md:p-10">
+                <div className="mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-2xl border border-dashed border-emerald-500/40 bg-zinc-950/60 p-8 text-center md:p-12">
+                  <div className="rounded-full border border-emerald-400/40 bg-emerald-500/10 p-4 text-emerald-300">
+                    <Upload className="size-8" />
+                  </div>
+                  <h2 className="text-2xl font-semibold text-zinc-100">
+                    Upload Audio To Start Cutting
+                  </h2>
+                  <p className="max-w-xl text-sm text-zinc-400 md:text-base">
+                    Select a local audio file to display the waveform, create
+                    regions, and export clips.
+                  </p>
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant="secondary"
+                    disabled={isSelectingAudio}
+                    onClick={handleSelectAudio}
+                  >
+                    {isSelectingAudio ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Upload className="size-4" />
+                    )}
+                    {isSelectingAudio ? "Opening..." : "Select Audio File"}
+                  </Button>
+                  {selectAudioError ? (
+                    <p className="text-sm text-red-300">{selectAudioError}</p>
+                  ) : null}
+                </div>
+              </section>
+            ) : (
+              <>
+                <WaveformPlayer
+                  containerRef={containerRef}
+                  hasAudio={Boolean(audioFilePath)}
+                  isLoading={isLoading}
+                  error={error}
+                  regions={regions}
+                  duration={duration}
+                  selectedRegionId={selectedRegionId}
+                  hoveredRegionId={hoveredRegionId}
+                  regionContextMenu={regionContextMenu}
+                  onCloseRegionContextMenu={closeRegionContextMenu}
+                  onPreviewRegionFromContextMenu={previewRegionFromContextMenu}
+                  onDeleteRegionFromContextMenu={deleteRegionFromContextMenu}
+                />
 
-          <section className="grid gap-4 lg:grid-cols-2">
-            <RegionList
-              regions={regions}
-              selectedRegionId={selectedRegionId}
-              onSelectRegion={selectRegion}
-              onPlayRegion={playRegion}
-              onDeleteRegion={removeRegion}
-            />
+                <TransportControls
+                  disabled={!isReady}
+                  isPlaying={isPlaying}
+                  currentTime={formatTime(currentTime)}
+                  duration={formatTime(duration)}
+                  volume={volume}
+                  onPlay={play}
+                  onPause={pause}
+                  onStop={stop}
+                  onVolumeChange={setVolume}
+                />
 
-            <CutPanel
-              selectedRegion={selectedRegion}
-              disabled={!isReady || !audioFilePath}
-              isProcessing={isProcessing}
-              preciseMode={preciseCutMode}
-              onPreciseModeChange={setPreciseCutMode}
-              onCutAndSave={handleCutAndSave}
-              onAddToMergeQueue={handleAddLastCutToMergeQueue}
-              canAddToMergeQueue={Boolean(lastCutPath)}
-              addedCount={mergeQueue.length}
-            />
+                <section className="grid gap-4 lg:grid-cols-2">
+                  <RegionList
+                    regions={regions}
+                    selectedRegionId={selectedRegionId}
+                    selectedRegionIds={selectedRegionIds}
+                    onSelectRegion={selectRegion}
+                    onToggleRegionSelection={handleToggleRegionSelection}
+                    onSelectAllRegions={handleSelectAllRegions}
+                    onClearRegionSelection={handleClearRegionSelection}
+                    onPlayRegion={playRegion}
+                    onDeleteRegion={removeRegion}
+                  />
 
-            <MergePanel
-              items={mergeQueue}
-              isProcessing={isProcessing || isImportingMergeFiles}
-              onImportFiles={handleImportMergeFiles}
-              onMergeAll={handleMergeAll}
-              onRemoveItem={handleRemoveMergeItem}
-              onReorderItems={handleReorderMergeItems}
-            />
+                  <CutPanel
+                    audioFilePath={audioFilePath}
+                    isSelectingAudio={isSelectingAudio}
+                    selectAudioError={selectAudioError}
+                    onSelectAudio={handleSelectAudio}
+                    selectedRegion={selectedRegion}
+                    selectedCount={selectedRegions.length}
+                    disabled={!isReady || !audioFilePath}
+                    isProcessing={isProcessing}
+                    preciseMode={preciseCutMode}
+                    onPreciseModeChange={setPreciseCutMode}
+                    onCutAndSave={() => handleCutAndSave(false)}
+                    onCutAndSaveAs={() => handleCutAndSave(true)}
+                    onAddToMergeQueue={handleAddLastCutToMergeQueue}
+                    canAddToMergeQueue={lastCutPaths.length > 0}
+                    addedCount={mergeQueue.length}
+                  />
+                </section>
+              </>
+            )}
+          </section>
+
+          <section
+            className={
+              activeTab === "merger"
+                ? "flex flex-col gap-4"
+                : "hidden flex-col gap-4"
+            }
+            aria-label="Audio merger workspace"
+          >
+            {mergeQueue.length === 0 ? (
+              <section className="rounded-2xl border border-zinc-800/90 bg-zinc-900/70 p-6 md:p-10">
+                <div className="mx-auto flex max-w-2xl flex-col items-center gap-4 rounded-2xl border border-dashed border-emerald-500/40 bg-zinc-950/60 p-8 text-center md:p-12">
+                  <div className="rounded-full border border-emerald-400/40 bg-emerald-500/10 p-4 text-emerald-300">
+                    <Upload className="size-8" />
+                  </div>
+                  <h2 className="text-2xl font-semibold text-zinc-100">
+                    Upload Files To Start Merging
+                  </h2>
+                  <p className="max-w-xl text-sm text-zinc-400 md:text-base">
+                    Import at least 2 audio files to enable merge output.
+                  </p>
+                  <Button
+                    type="button"
+                    size="lg"
+                    variant="secondary"
+                    disabled={isImportingMergeFiles || isProcessing}
+                    onClick={handleImportMergeFiles}
+                  >
+                    {isImportingMergeFiles ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Upload className="size-4" />
+                    )}
+                    {isImportingMergeFiles
+                      ? "Importing..."
+                      : "Import Audio Files"}
+                  </Button>
+                </div>
+              </section>
+            ) : (
+              <>
+                {mergeQueue.length < 2 ? (
+                  <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                    Upload at least one more file to merge. Minimum required: 2
+                    files.
+                  </p>
+                ) : null}
+
+                <MergePanel
+                  items={mergeQueue}
+                  isProcessing={isProcessing || isImportingMergeFiles}
+                  onImportFiles={handleImportMergeFiles}
+                  onMergeAll={handleMergeAll}
+                  onMergeAllAs={handleMergeAllAs}
+                  onRemoveItem={handleRemoveMergeItem}
+                  onReorderItems={handleReorderMergeItems}
+                />
+              </>
+            )}
           </section>
         </section>
       </main>
@@ -513,22 +1007,19 @@ function formatTime(valueInSeconds: number): string {
   return `${minutes}:${seconds}`;
 }
 
-function toFileUrl(filePath: string | null): string | null {
-  if (!filePath) {
-    return null;
-  }
+function guessAudioMimeType(filePath: string): string {
+  const extension = getLowercaseExt(filePath);
 
-  const normalized = filePath.replace(/\\/g, "/");
+  if (extension === ".mp3") return "audio/mpeg";
+  if (extension === ".wav") return "audio/wav";
+  if (extension === ".flac") return "audio/flac";
+  if (extension === ".ogg") return "audio/ogg";
+  if (extension === ".aac") return "audio/aac";
+  if (extension === ".m4a") return "audio/mp4";
+  if (extension === ".opus") return "audio/opus";
+  if (extension === ".aif" || extension === ".aiff") return "audio/aiff";
 
-  if (/^[a-zA-Z]:\//.test(normalized)) {
-    return encodeURI(`file:///${normalized}`);
-  }
-
-  if (normalized.startsWith("//")) {
-    return encodeURI(`file:${normalized}`);
-  }
-
-  return encodeURI(`file://${normalized}`);
+  return "application/octet-stream";
 }
 
 function getLowercaseExt(filePath: string): string {
@@ -572,6 +1063,12 @@ function dedupeFilePaths(filePaths: string[]): string[] {
 
 function normalizeForCompare(filePath: string): string {
   return filePath.replace(/[\\/]+/g, "/").toLowerCase();
+}
+
+function joinPath(folderPath: string, fileName: string): string {
+  const separator = folderPath.includes("\\") ? "\\" : "/";
+  const trimmed = folderPath.replace(/[\\/]+$/, "");
+  return `${trimmed}${separator}${fileName}`;
 }
 
 function suggestMergeOutputExtension(

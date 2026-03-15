@@ -21,25 +21,43 @@ export type WaveformRegion = {
   color: string;
 };
 
+export type RegionContextMenuState = {
+  regionId: string;
+  x: number;
+  y: number;
+};
+
+type AudioSource = string | Blob | null;
+
 type UseWaveSurferResult = {
   containerRef: MutableRefObject<HTMLDivElement | null>;
   isReady: boolean;
   isLoading: boolean;
   isPlaying: boolean;
+  volume: number;
   duration: number;
   currentTime: number;
   error: string | null;
   regions: WaveformRegion[];
   selectedRegionId: string | null;
+  hoveredRegionId: string | null;
+  regionContextMenu: RegionContextMenuState | null;
   play: () => Promise<void>;
   pause: () => void;
   stop: () => void;
+  setVolume: (value: number) => void;
   selectRegion: (regionId: string | null) => void;
   playRegion: (regionId: string) => void;
   removeRegion: (regionId: string) => void;
+  closeRegionContextMenu: () => void;
+  previewRegionFromContextMenu: () => void;
+  deleteRegionFromContextMenu: () => void;
 };
 
-export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
+export function useWaveSurfer(
+  audioSource: AudioSource,
+  initToken: string,
+): UseWaveSurferResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const waveSurferRef = useRef<WaveSurfer | null>(null);
   const regionsPluginRef = useRef<RegionsPlugin | null>(null);
@@ -48,11 +66,16 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
   const [isReady, setIsReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [volume, setVolumeState] = useState(1);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [regions, setRegions] = useState<WaveformRegion[]>([]);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+  const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
+  const [regionContextMenu, setRegionContextMenu] =
+    useState<RegionContextMenuState | null>(null);
+  const [instanceRevision, setInstanceRevision] = useState(0);
 
   const syncRegions = () => {
     const regionsPlugin = regionsPluginRef.current;
@@ -81,6 +104,14 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       const exists = nextRegions.some((region) => region.id === current);
       return exists ? current : (nextRegions[0]?.id ?? null);
     });
+    setHoveredRegionId((current) => {
+      if (!current) {
+        return null;
+      }
+
+      const exists = nextRegions.some((region) => region.id === current);
+      return exists ? current : null;
+    });
   };
 
   const chooseRegionColor = () => {
@@ -91,16 +122,41 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
   };
 
   const ensureRegionInteractive = (region: Region) => {
+    const regionElement = (region as Region & { element?: HTMLElement })
+      .element;
+
     region.on("click", (event) => {
       event.stopPropagation();
       setSelectedRegionId(region.id);
+      setRegionContextMenu(null);
     });
 
     region.on("dblclick", (event) => {
       event.stopPropagation();
-      region.play(true);
       setSelectedRegionId(region.id);
+      setRegionContextMenu(null);
     });
+
+    region.on("over", () => {
+      setHoveredRegionId(region.id);
+    });
+
+    region.on("leave", () => {
+      setHoveredRegionId((current) => (current === region.id ? null : current));
+    });
+
+    if (regionElement) {
+      regionElement.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setSelectedRegionId(region.id);
+        setRegionContextMenu({
+          regionId: region.id,
+          x: event.clientX,
+          y: event.clientY,
+        });
+      });
+    }
   };
 
   useEffect(() => {
@@ -123,9 +179,11 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       normalize: true,
       dragToSeek: true,
     });
+    waveSurfer.setVolume(1);
 
     waveSurferRef.current = waveSurfer;
     regionsPluginRef.current = regionsPlugin;
+    setInstanceRevision((current) => current + 1);
     const disableDragSelection = regionsPlugin.enableDragSelection({
       color: "rgba(16, 185, 129, 0.24)",
       drag: true,
@@ -151,6 +209,8 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       setIsPlaying(false);
       setRegions([]);
       setSelectedRegionId(null);
+      setHoveredRegionId(null);
+      setRegionContextMenu(null);
     });
 
     const unbindPlay = waveSurfer.on("play", () => {
@@ -179,14 +239,15 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       setError(typeof detail === "string" ? detail : "Failed to load audio.");
       setRegions([]);
       setSelectedRegionId(null);
+      setHoveredRegionId(null);
+      setRegionContextMenu(null);
     });
 
-    const unbindWaveformClick = waveSurfer.on("click", (relativeX) => {
-      const regionsApi = regionsPluginRef.current;
-      if (!regionsApi) {
-        return;
-      }
+    const unbindWaveformClick = waveSurfer.on("click", () => {
+      setRegionContextMenu(null);
+    });
 
+    const unbindWaveformDoubleClick = waveSurfer.on("dblclick", (relativeX) => {
       const durationInSeconds = waveSurfer.getDuration();
       if (
         !Number.isFinite(durationInSeconds) ||
@@ -197,14 +258,6 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
 
       const boundedRatio = Math.min(1, Math.max(0, relativeX));
       const clickTime = boundedRatio * durationInSeconds;
-      const clickedRegion = regionsApi
-        .getRegions()
-        .find((region) => clickTime >= region.start && clickTime <= region.end);
-      if (clickedRegion) {
-        setSelectedRegionId(clickedRegion.id);
-        return;
-      }
-
       const end = Math.min(
         durationInSeconds,
         clickTime + DEFAULT_REGION_DURATION_SECONDS,
@@ -215,7 +268,7 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
         start = Math.max(0, end - MIN_REGION_DURATION_SECONDS);
       }
 
-      regionsApi.addRegion({
+      regionsPlugin.addRegion({
         start,
         end,
         color: chooseRegionColor(),
@@ -252,6 +305,7 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       unbindTimeUpdate();
       unbindError();
       unbindWaveformClick();
+      unbindWaveformDoubleClick();
       unbindRegionCreated();
       unbindRegionUpdated();
       unbindRegionRemoved();
@@ -259,7 +313,7 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       waveSurferRef.current = null;
       regionsPluginRef.current = null;
     };
-  }, []);
+  }, [initToken]);
 
   useEffect(() => {
     const waveSurfer = waveSurferRef.current;
@@ -267,7 +321,7 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       return;
     }
 
-    if (!audioUrl) {
+    if (!audioSource) {
       regionsPluginRef.current?.clearRegions();
       waveSurfer.empty();
       setIsLoading(false);
@@ -278,6 +332,8 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
       setError(null);
       setRegions([]);
       setSelectedRegionId(null);
+      setHoveredRegionId(null);
+      setRegionContextMenu(null);
       return;
     }
 
@@ -287,8 +343,17 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
     setIsPlaying(false);
     setDuration(0);
     setCurrentTime(0);
-    waveSurfer.load(audioUrl);
-  }, [audioUrl]);
+    if (audioSource instanceof Blob) {
+      void waveSurfer.loadBlob(audioSource);
+      return;
+    }
+
+    waveSurfer.load(audioSource);
+  }, [audioSource, instanceRevision]);
+
+  useEffect(() => {
+    waveSurferRef.current?.setVolume(volume);
+  }, [volume]);
 
   const play = async () => {
     const waveSurfer = waveSurferRef.current;
@@ -316,6 +381,13 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
 
     waveSurfer.stop();
     setCurrentTime(0);
+  };
+
+  const setVolume = (value: number) => {
+    const normalized = Number.isFinite(value)
+      ? Math.min(1, Math.max(0, value))
+      : 1;
+    setVolumeState(normalized);
   };
 
   const selectRegion = (regionId: string | null) => {
@@ -353,7 +425,34 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
     }
 
     region.remove();
+    setRegionContextMenu((current) =>
+      current?.regionId === regionId ? null : current,
+    );
     syncRegions();
+  };
+
+  const closeRegionContextMenu = () => {
+    setRegionContextMenu(null);
+  };
+
+  const previewRegionFromContextMenu = () => {
+    const targetRegionId = regionContextMenu?.regionId;
+    if (!targetRegionId) {
+      return;
+    }
+
+    playRegion(targetRegionId);
+    setRegionContextMenu(null);
+  };
+
+  const deleteRegionFromContextMenu = () => {
+    const targetRegionId = regionContextMenu?.regionId;
+    if (!targetRegionId) {
+      return;
+    }
+
+    removeRegion(targetRegionId);
+    setRegionContextMenu(null);
   };
 
   return {
@@ -361,16 +460,23 @@ export function useWaveSurfer(audioUrl: string | null): UseWaveSurferResult {
     isReady,
     isLoading,
     isPlaying,
+    volume,
     duration,
     currentTime,
     error,
     regions,
     selectedRegionId,
+    hoveredRegionId,
+    regionContextMenu,
     play,
     pause,
     stop,
+    setVolume,
     selectRegion,
     playRegion,
     removeRegion,
+    closeRegionContextMenu,
+    previewRegionFromContextMenu,
+    deleteRegionFromContextMenu,
   };
 }
