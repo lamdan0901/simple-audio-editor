@@ -22,6 +22,17 @@ type WorkspaceTab = "cutter" | "merger";
 
 const MIN_CUT_DURATION_SECONDS = 0.05;
 
+type RegionFadeSettings = {
+  fadeIn: boolean;
+  fadeOut: boolean;
+  fadeInDuration: number;
+  fadeOutDuration: number;
+};
+
+const DEFAULT_FADE_DURATION_SECONDS = 2;
+const MIN_FADE_DURATION_SECONDS = 0.1;
+const MAX_FADE_DURATION_SECONDS = 30;
+
 function App() {
   const [ffmpeg, setFfmpeg] = useState<FfmpegState>({
     loading: true,
@@ -35,6 +46,9 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [preciseCutMode, setPreciseCutMode] = useState(false);
   const [selectedRegionIds, setSelectedRegionIds] = useState<string[]>([]);
+  const [regionFadeById, setRegionFadeById] = useState<
+    Record<string, RegionFadeSettings>
+  >({});
   const [lastCutPaths, setLastCutPaths] = useState<string[]>([]);
   const [mergeQueue, setMergeQueue] = useState<MergeQueueItem[]>([]);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("cutter");
@@ -69,7 +83,11 @@ function App() {
     deleteRegionFromContextMenu,
   } = useWaveSurfer(
     audioBlob,
-    ffmpeg.loading ? "ffmpeg-loading" : "ffmpeg-ready",
+    ffmpeg.loading
+      ? "ffmpeg-loading"
+      : audioFilePath
+        ? "ffmpeg-ready-with-file"
+        : "ffmpeg-ready-no-file",
   );
 
   const selectedRegion = useMemo(
@@ -85,6 +103,22 @@ function App() {
     const selectedIds = new Set(selectedRegionIds);
     return regions.filter((region) => selectedIds.has(region.id));
   }, [regions, selectedRegionIds]);
+
+  const fadeInRegionIds = useMemo(
+    () =>
+      regions
+        .filter((region) => regionFadeById[region.id]?.fadeIn)
+        .map((region) => region.id),
+    [regionFadeById, regions],
+  );
+
+  const fadeOutRegionIds = useMemo(
+    () =>
+      regions
+        .filter((region) => regionFadeById[region.id]?.fadeOut)
+        .map((region) => region.id),
+    [regionFadeById, regions],
+  );
 
   const statusText = useMemo(() => {
     if (ffmpeg.loading) return "Checking FFmpeg...";
@@ -143,7 +177,23 @@ function App() {
   useEffect(() => {
     setLastCutPaths([]);
     setSelectedRegionIds([]);
+    setRegionFadeById({});
   }, [audioFilePath]);
+
+  useEffect(() => {
+    setRegionFadeById((current) => {
+      const validIds = new Set(regions.map((region) => region.id));
+      const nextEntries = Object.entries(current).filter(([regionId]) =>
+        validIds.has(regionId),
+      );
+
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+
+      return Object.fromEntries(nextEntries);
+    });
+  }, [regions]);
 
   useEffect(() => {
     setSelectedRegionIds((current) => {
@@ -375,11 +425,32 @@ function App() {
 
     const sourceExtension = getLowercaseExt(audioFilePath);
     const baseName = getBaseName(audioFilePath);
-    const defaultExtension =
-      (sourceExtension === ".mp3" || sourceExtension === ".m4a") &&
-      !preciseCutMode
-        ? sourceExtension
-        : ".wav";
+
+    const getRegionFadeSettings = (regionId: string): RegionFadeSettings =>
+      regionFadeById[regionId] ?? {
+        fadeIn: false,
+        fadeOut: false,
+        fadeInDuration: DEFAULT_FADE_DURATION_SECONDS,
+        fadeOutDuration: DEFAULT_FADE_DURATION_SECONDS,
+      };
+
+    const isRegionPrecise = (regionId: string): boolean => {
+      const fadeSettings = getRegionFadeSettings(regionId);
+      return preciseCutMode || fadeSettings.fadeIn || fadeSettings.fadeOut;
+    };
+
+    const getRegionOutputExtension = (regionId: string): string => {
+      if (sourceExtension === ".m4a") {
+        return ".m4a";
+      }
+
+      if (sourceExtension !== ".mp3") {
+        return ".wav";
+      }
+
+      return isRegionPrecise(regionId) ? ".wav" : sourceExtension;
+    };
+
     const invalidRegion = selectedRegions.find((region) => {
       const cutDuration = region.end - region.start;
       return (
@@ -393,17 +464,20 @@ function App() {
       return;
     }
 
-    const defaultName = `${baseName}_${selectedRegions[0].start.toFixed(3)}-${selectedRegions[0].end.toFixed(3)}${defaultExtension}`;
+    const firstRegion = selectedRegions[0];
+    const defaultName = `${baseName}_${firstRegion.start.toFixed(3)}-${firstRegion.end.toFixed(3)}${getRegionOutputExtension(firstRegion.id)}`;
 
     setIsProcessing(true);
 
     try {
       if (selectedRegions.length === 1) {
         const selectedRegion = selectedRegions[0];
+        const fadeSettings = getRegionFadeSettings(selectedRegion.id);
+        const cutMode = isRegionPrecise(selectedRegion.id) ? "precise" : "copy";
         const saveResult = await window.api.saveAudioFile({
           defaultName,
           inputExtension: sourceExtension,
-          mode: preciseCutMode ? "precise" : "copy",
+          mode: cutMode,
           forceDialog,
         });
         if (!saveResult.filePath) {
@@ -416,7 +490,11 @@ function App() {
           startTime: selectedRegion.start,
           endTime: selectedRegion.end,
           outputPath: saveResult.filePath,
-          mode: preciseCutMode ? "precise" : "copy",
+          mode: cutMode,
+          fadeIn: fadeSettings.fadeIn,
+          fadeOut: fadeSettings.fadeOut,
+          fadeInDuration: fadeSettings.fadeInDuration,
+          fadeOutDuration: fadeSettings.fadeOutDuration,
         });
 
         if (!cutResult.success) {
@@ -451,7 +529,10 @@ function App() {
 
       for (let index = 0; index < selectedRegions.length; index += 1) {
         const region = selectedRegions[index];
-        const outputName = `${baseName}_${String(index + 1).padStart(3, "0")}_${region.start.toFixed(3)}-${region.end.toFixed(3)}${defaultExtension}`;
+        const fadeSettings = getRegionFadeSettings(region.id);
+        const cutMode = isRegionPrecise(region.id) ? "precise" : "copy";
+        const outputExtension = getRegionOutputExtension(region.id);
+        const outputName = `${baseName}_${String(index + 1).padStart(3, "0")}_${region.start.toFixed(3)}-${region.end.toFixed(3)}${outputExtension}`;
         const outputPath = joinPath(outputFolder, outputName);
 
         const cutResult = await window.api.cutAudio({
@@ -459,7 +540,11 @@ function App() {
           startTime: region.start,
           endTime: region.end,
           outputPath,
-          mode: preciseCutMode ? "precise" : "copy",
+          mode: cutMode,
+          fadeIn: fadeSettings.fadeIn,
+          fadeOut: fadeSettings.fadeOut,
+          fadeInDuration: fadeSettings.fadeInDuration,
+          fadeOutDuration: fadeSettings.fadeOutDuration,
         });
 
         if (!cutResult.success) {
@@ -511,6 +596,84 @@ function App() {
       }
 
       return [...current, regionId];
+    });
+  };
+
+  const handleToggleRegionFadeIn = (regionId: string) => {
+    setRegionFadeById((current) => {
+      const existing = current[regionId] ?? {
+        fadeIn: false,
+        fadeOut: false,
+        fadeInDuration: DEFAULT_FADE_DURATION_SECONDS,
+        fadeOutDuration: DEFAULT_FADE_DURATION_SECONDS,
+      };
+      return {
+        ...current,
+        [regionId]: {
+          ...existing,
+          fadeIn: !existing.fadeIn,
+        },
+      };
+    });
+  };
+
+  const handleToggleRegionFadeOut = (regionId: string) => {
+    setRegionFadeById((current) => {
+      const existing = current[regionId] ?? {
+        fadeIn: false,
+        fadeOut: false,
+        fadeInDuration: DEFAULT_FADE_DURATION_SECONDS,
+        fadeOutDuration: DEFAULT_FADE_DURATION_SECONDS,
+      };
+      return {
+        ...current,
+        [regionId]: {
+          ...existing,
+          fadeOut: !existing.fadeOut,
+        },
+      };
+    });
+  };
+
+  const handleSetRegionFadeInDuration = (regionId: string, value: number) => {
+    const nextValue = clampFadeDuration(value);
+
+    setRegionFadeById((current) => {
+      const existing = current[regionId] ?? {
+        fadeIn: false,
+        fadeOut: false,
+        fadeInDuration: DEFAULT_FADE_DURATION_SECONDS,
+        fadeOutDuration: DEFAULT_FADE_DURATION_SECONDS,
+      };
+
+      return {
+        ...current,
+        [regionId]: {
+          ...existing,
+          fadeInDuration: nextValue,
+        },
+      };
+    });
+  };
+
+  const handleSetRegionFadeOutDuration = (regionId: string, value: number) => {
+    const nextValue = clampFadeDuration(value);
+
+    setRegionFadeById((current) => {
+      const existing = current[regionId] ?? {
+        fadeIn: false,
+        fadeOut: false,
+        fadeInDuration: DEFAULT_FADE_DURATION_SECONDS,
+        fadeOutDuration: DEFAULT_FADE_DURATION_SECONDS,
+      };
+
+      return {
+        ...current,
+        [regionId]: {
+          ...existing,
+          fadeOutDuration: nextValue,
+        },
+      };
     });
   };
 
@@ -899,8 +1062,15 @@ function App() {
                     regions={regions}
                     selectedRegionId={selectedRegionId}
                     selectedRegionIds={selectedRegionIds}
+                    fadeInRegionIds={fadeInRegionIds}
+                    fadeOutRegionIds={fadeOutRegionIds}
+                    fadeDurationsByRegionId={regionFadeById}
                     onSelectRegion={selectRegion}
                     onToggleRegionSelection={handleToggleRegionSelection}
+                    onToggleRegionFadeIn={handleToggleRegionFadeIn}
+                    onToggleRegionFadeOut={handleToggleRegionFadeOut}
+                    onSetRegionFadeInDuration={handleSetRegionFadeInDuration}
+                    onSetRegionFadeOutDuration={handleSetRegionFadeOutDuration}
                     onSelectAllRegions={handleSelectAllRegions}
                     onClearRegionSelection={handleClearRegionSelection}
                     onPlayRegion={playRegion}
@@ -1129,6 +1299,17 @@ function getUserFacingError(error: unknown): string {
   }
 
   return normalized;
+}
+
+function clampFadeDuration(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_FADE_DURATION_SECONDS;
+  }
+
+  return Math.min(
+    MAX_FADE_DURATION_SECONDS,
+    Math.max(MIN_FADE_DURATION_SECONDS, value),
+  );
 }
 
 export default App;

@@ -60,6 +60,10 @@ type CutPayload = {
   endTime: number;
   outputPath: string;
   mode?: "copy" | "precise";
+  fadeIn?: boolean;
+  fadeOut?: boolean;
+  fadeInDuration?: number;
+  fadeOutDuration?: number;
 };
 
 type SaveAudioDialogPayload = {
@@ -84,6 +88,7 @@ type ProbeJsonStream = {
   sample_rate?: string;
   channels?: number;
   channel_layout?: string;
+  bit_rate?: string;
 };
 
 type ProbeJson = {
@@ -95,6 +100,7 @@ type AudioStreamInfo = {
   sampleRate: number;
   channels: number;
   channelLayout: string;
+  bitRate: number;
 };
 
 const AUDIO_EXTENSIONS = [
@@ -113,6 +119,7 @@ const PASSTHROUGH_EXTENSIONS = new Set([".mp3", ".m4a"]);
 const LOSSLESS_OUTPUT_EXTENSIONS = new Set([".wav", ".flac"]);
 const COPY_MERGE_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".flac"]);
 const MERGE_OUTPUT_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".flac"]);
+const DEFAULT_FADE_DURATION_SECONDS = 2;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -225,11 +232,14 @@ function runFfprobe(filePath: string): Promise<AudioStreamInfo> {
           return;
         }
 
+        const bitRate = Number.parseInt(stream.bit_rate ?? "", 10);
+
         resolve({
           codec: stream.codec_name,
           sampleRate,
           channels,
           channelLayout: stream.channel_layout ?? "",
+          bitRate: Number.isFinite(bitRate) && bitRate > 0 ? bitRate : 0,
         });
       },
     );
@@ -274,12 +284,39 @@ function validateCutPayload(payload: unknown): CutPayload {
     throw new Error("mode must be either copy or precise.");
   }
 
+  if (candidate.fadeIn != null && typeof candidate.fadeIn !== "boolean") {
+    throw new Error("fadeIn must be a boolean.");
+  }
+
+  if (candidate.fadeOut != null && typeof candidate.fadeOut !== "boolean") {
+    throw new Error("fadeOut must be a boolean.");
+  }
+
+  if (
+    candidate.fadeInDuration != null &&
+    (!isFiniteNumber(candidate.fadeInDuration) || candidate.fadeInDuration <= 0)
+  ) {
+    throw new Error("fadeInDuration must be a finite number > 0.");
+  }
+
+  if (
+    candidate.fadeOutDuration != null &&
+    (!isFiniteNumber(candidate.fadeOutDuration) ||
+      candidate.fadeOutDuration <= 0)
+  ) {
+    throw new Error("fadeOutDuration must be a finite number > 0.");
+  }
+
   return {
     inputPath: toAbsolutePath(candidate.inputPath),
     startTime: candidate.startTime,
     endTime: candidate.endTime,
     outputPath: toAbsolutePath(candidate.outputPath),
     mode: candidate.mode,
+    fadeIn: candidate.fadeIn ?? false,
+    fadeOut: candidate.fadeOut ?? false,
+    fadeInDuration: candidate.fadeInDuration ?? DEFAULT_FADE_DURATION_SECONDS,
+    fadeOutDuration: candidate.fadeOutDuration ?? DEFAULT_FADE_DURATION_SECONDS,
   };
 }
 
@@ -328,6 +365,7 @@ function buildCutCodecArgs(
   inputExt: string,
   outputExt: string,
   mode?: "copy" | "precise",
+  sourceBitRate?: number,
 ): string[] {
   const shouldUseCopy =
     mode !== "precise" && PASSTHROUGH_EXTENSIONS.has(inputExt);
@@ -347,7 +385,11 @@ function buildCutCodecArgs(
   }
 
   if (outputExt === ".m4a") {
-    return ["-c:a", "aac", "-b:a", "192k"];
+    const targetBitRate =
+      sourceBitRate && sourceBitRate > 0
+        ? `${Math.round(sourceBitRate / 1000)}k`
+        : "256k";
+    return ["-c:a", "aac", "-b:a", targetBitRate];
   }
 
   if (outputExt === ".wav") {
@@ -361,6 +403,43 @@ function buildCutCodecArgs(
   throw new Error(
     "Unsupported output extension. Use .mp3, .m4a, .wav, or .flac.",
   );
+}
+
+function buildFadeAudioFilter(
+  durationInSeconds: number,
+  fadeInEnabled: boolean,
+  fadeOutEnabled: boolean,
+  fadeInDurationInSeconds: number,
+  fadeOutDurationInSeconds: number,
+): string | null {
+  if (!fadeInEnabled && !fadeOutEnabled) {
+    return null;
+  }
+
+  const maxPerDirection = Math.max(0.01, durationInSeconds / 2);
+  const fadeInDuration = Math.min(
+    maxPerDirection,
+    Math.max(0.01, fadeInDurationInSeconds),
+  );
+  const fadeOutDuration = Math.min(
+    maxPerDirection,
+    Math.max(0.01, fadeOutDurationInSeconds),
+  );
+
+  const filters: string[] = [];
+
+  if (fadeInEnabled) {
+    filters.push(`afade=t=in:st=0:d=${secondsToArgument(fadeInDuration)}`);
+  }
+
+  if (fadeOutEnabled) {
+    const fadeOutStart = Math.max(0, durationInSeconds - fadeOutDuration);
+    filters.push(
+      `afade=t=out:st=${secondsToArgument(fadeOutStart)}:d=${secondsToArgument(fadeOutDuration)}`,
+    );
+  }
+
+  return filters.join(",");
 }
 
 function normalizeExtension(value: string | undefined): string {
@@ -817,9 +896,12 @@ function registerIpcHandlers() {
 
     const inputExt = getExtension(params.inputPath);
     const outputExt = getExtension(params.outputPath);
+    const requiresFade = Boolean(params.fadeIn || params.fadeOut);
+    const effectiveMode: "copy" | "precise" =
+      params.mode === "precise" || requiresFade ? "precise" : "copy";
 
     if (PASSTHROUGH_EXTENSIONS.has(inputExt)) {
-      if (params.mode !== "precise" && outputExt !== inputExt) {
+      if (effectiveMode !== "precise" && outputExt !== inputExt) {
         throw new Error(
           "Output extension must match input for MP3/M4A passthrough cuts.",
         );
@@ -828,7 +910,29 @@ function registerIpcHandlers() {
       throw new Error("For non-MP3/M4A sources, output must be .wav or .flac.");
     }
 
-    const codecArgs = buildCutCodecArgs(inputExt, outputExt, params.mode);
+    let sourceBitRate: number | undefined;
+    if (
+      effectiveMode === "precise" &&
+      inputExt === ".m4a" &&
+      outputExt === ".m4a"
+    ) {
+      const probeInfo = await runFfprobe(params.inputPath);
+      sourceBitRate = probeInfo.bitRate;
+    }
+
+    const codecArgs = buildCutCodecArgs(
+      inputExt,
+      outputExt,
+      effectiveMode,
+      sourceBitRate,
+    );
+    const filterAudioArg = buildFadeAudioFilter(
+      params.endTime - params.startTime,
+      Boolean(params.fadeIn),
+      Boolean(params.fadeOut),
+      params.fadeInDuration ?? DEFAULT_FADE_DURATION_SECONDS,
+      params.fadeOutDuration ?? DEFAULT_FADE_DURATION_SECONDS,
+    );
 
     const ffmpegArgs = [
       "-hide_banner",
@@ -841,6 +945,7 @@ function registerIpcHandlers() {
       secondsToArgument(params.endTime),
       "-i",
       params.inputPath,
+      ...(filterAudioArg ? ["-af", filterAudioArg] : []),
       ...codecArgs,
       params.outputPath,
     ];

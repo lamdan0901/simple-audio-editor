@@ -1,61 +1,51 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
-import { execFile } from "node:child_process";
-import { readFile, mkdir, writeFile, unlink, stat } from "node:fs/promises";
-const DEFAULT_SETTINGS = {
+import { app as b, BrowserWindow as P, ipcMain as p, dialog as w } from "electron";
+import { fileURLToPath as G } from "node:url";
+import s from "node:path";
+import { existsSync as X } from "node:fs";
+import { randomUUID as J } from "node:crypto";
+import { tmpdir as K } from "node:os";
+import { execFile as I } from "node:child_process";
+import { readFile as U, mkdir as Y, writeFile as W, unlink as Q, stat as T } from "node:fs/promises";
+const Z = {
   defaultOutputFolder: null
 };
-function getSettingsPath() {
-  return path.join(app.getPath("userData"), "settings.json");
+function $() {
+  return s.join(b.getPath("userData"), "settings.json");
 }
-function normalizeFolderPath(value) {
-  if (typeof value !== "string") {
+function z(t) {
+  if (typeof t != "string")
     return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  return path.resolve(trimmed);
+  const e = t.trim();
+  return e ? s.resolve(e) : null;
 }
-async function loadSettings() {
+async function ee() {
   try {
-    const raw = await readFile(getSettingsPath(), "utf8");
-    const parsed = JSON.parse(raw);
+    const t = await U($(), "utf8"), e = JSON.parse(t);
     return {
-      defaultOutputFolder: normalizeFolderPath(parsed.defaultOutputFolder)
+      defaultOutputFolder: z(e.defaultOutputFolder)
     };
   } catch {
-    return DEFAULT_SETTINGS;
+    return Z;
   }
 }
-async function saveSettings(settings) {
-  const settingsPath = getSettingsPath();
-  await mkdir(path.dirname(settingsPath), { recursive: true });
-  const normalized = {
-    defaultOutputFolder: normalizeFolderPath(settings.defaultOutputFolder)
+async function y(t) {
+  const e = $();
+  await Y(s.dirname(e), { recursive: !0 });
+  const n = {
+    defaultOutputFolder: z(t.defaultOutputFolder)
   };
-  await writeFile(settingsPath, JSON.stringify(normalized, null, 2), "utf8");
+  await W(e, JSON.stringify(n, null, 2), "utf8");
 }
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path.join(__dirname$1, "..");
-const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
-const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-const APP_ICON_PATH = path.join(process.env.APP_ROOT, "resources", "icon.ico");
-const FALLBACK_ICON_PATH = path.join(
+const q = s.dirname(G(import.meta.url));
+process.env.APP_ROOT = s.join(q, "..");
+const x = process.env.VITE_DEV_SERVER_URL, Te = s.join(process.env.APP_ROOT, "dist-electron"), V = s.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = x ? s.join(process.env.APP_ROOT, "public") : V;
+const C = s.join(process.env.APP_ROOT, "resources", "icon.ico"), te = s.join(
   process.env.VITE_PUBLIC,
   "electron-vite.svg"
-);
-const WINDOW_ICON_PATH = existsSync(APP_ICON_PATH) ? APP_ICON_PATH : FALLBACK_ICON_PATH;
-let win;
-let appSettings = { defaultOutputFolder: null };
-const AUDIO_EXTENSIONS = [
+), ne = X(C) ? C : te;
+let g, f = { defaultOutputFolder: null };
+const re = [
   "mp3",
   "wav",
   "flac",
@@ -66,282 +56,264 @@ const AUDIO_EXTENSIONS = [
   "aiff",
   "aif",
   "opus"
-];
-const PASSTHROUGH_EXTENSIONS = /* @__PURE__ */ new Set([".mp3", ".m4a"]);
-const LOSSLESS_OUTPUT_EXTENSIONS = /* @__PURE__ */ new Set([".wav", ".flac"]);
-const COPY_MERGE_EXTENSIONS = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]);
-const MERGE_OUTPUT_EXTENSIONS = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]);
-function isFiniteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value);
+], O = /* @__PURE__ */ new Set([".mp3", ".m4a"]), M = /* @__PURE__ */ new Set([".wav", ".flac"]), oe = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]), ae = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".flac"]), D = 2;
+function E(t) {
+  return typeof t == "number" && Number.isFinite(t);
 }
-function toAbsolutePath(value) {
-  return path.resolve(value);
+function h(t) {
+  return s.resolve(t);
 }
-function secondsToArgument(valueInSeconds) {
-  return valueInSeconds.toFixed(3);
+function v(t) {
+  return t.toFixed(3);
 }
-function getExtension(filePath) {
-  return path.extname(filePath).toLowerCase();
+function F(t) {
+  return s.extname(t).toLowerCase();
 }
-async function ensureFile(filePath) {
-  const target = await stat(filePath);
-  if (!target.isFile()) {
+async function S(t) {
+  if (!(await T(t)).isFile())
     throw new Error("Input path must be a file.");
-  }
 }
-async function ensureDirectoryExists(filePath) {
-  const parentDir = path.dirname(filePath);
-  const target = await stat(parentDir);
-  if (!target.isDirectory()) {
+async function L(t) {
+  const e = s.dirname(t);
+  if (!(await T(e)).isDirectory())
     throw new Error("Output directory does not exist.");
-  }
 }
-async function isExistingDirectory(folderPath) {
+async function _(t) {
   try {
-    const target = await stat(folderPath);
-    return target.isDirectory();
+    return (await T(t)).isDirectory();
   } catch {
-    return false;
+    return !1;
   }
 }
-function runFfmpeg(args) {
-  return new Promise((resolve, reject) => {
-    execFile(
+function A(t) {
+  return new Promise((e, n) => {
+    I(
       "ffmpeg",
-      args,
-      { windowsHide: true },
-      (error, _stdout, stderr) => {
-        if (!error) {
-          resolve();
+      t,
+      { windowsHide: !0 },
+      (r, o, u) => {
+        if (!r) {
+          e();
           return;
         }
-        const message = stderr.trim() || error.message || "FFmpeg command failed.";
-        reject(new Error(message));
+        const i = u.trim() || r.message || "FFmpeg command failed.";
+        n(new Error(i));
       }
     );
   });
 }
-function runFfprobe(filePath) {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "-v",
-      "error",
-      "-select_streams",
-      "a:0",
-      "-show_streams",
-      "-of",
-      "json",
-      filePath
-    ];
-    execFile(
+function R(t) {
+  return new Promise((e, n) => {
+    I(
       "ffprobe",
-      args,
-      { windowsHide: true },
-      (error, stdout, stderr) => {
-        var _a;
-        if (error) {
-          const message = stderr.trim() || error.message || "FFprobe command failed.";
-          reject(new Error(message));
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_streams",
+        "-of",
+        "json",
+        t
+      ],
+      { windowsHide: !0 },
+      (o, u, i) => {
+        var N;
+        if (o) {
+          const k = i.trim() || o.message || "FFprobe command failed.";
+          n(new Error(k));
           return;
         }
-        let parsed;
+        let l;
         try {
-          parsed = JSON.parse(stdout);
+          l = JSON.parse(u);
         } catch {
-          reject(new Error("Unable to parse FFprobe output."));
+          n(new Error("Unable to parse FFprobe output."));
           return;
         }
-        const stream = (_a = parsed.streams) == null ? void 0 : _a[0];
-        if (!(stream == null ? void 0 : stream.codec_name)) {
-          reject(new Error("No primary audio stream found."));
+        const a = (N = l.streams) == null ? void 0 : N[0];
+        if (!(a != null && a.codec_name)) {
+          n(new Error("No primary audio stream found."));
           return;
         }
-        const sampleRate = Number.parseInt(stream.sample_rate ?? "", 10);
-        if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
-          reject(new Error("Invalid audio sample rate from FFprobe."));
+        const c = Number.parseInt(a.sample_rate ?? "", 10);
+        if (!Number.isFinite(c) || c <= 0) {
+          n(new Error("Invalid audio sample rate from FFprobe."));
           return;
         }
-        const channels = stream.channels ?? 0;
-        if (!Number.isFinite(channels) || channels <= 0) {
-          reject(new Error("Invalid audio channel count from FFprobe."));
+        const d = a.channels ?? 0;
+        if (!Number.isFinite(d) || d <= 0) {
+          n(new Error("Invalid audio channel count from FFprobe."));
           return;
         }
-        resolve({
-          codec: stream.codec_name,
-          sampleRate,
-          channels,
-          channelLayout: stream.channel_layout ?? ""
+        const m = Number.parseInt(a.bit_rate ?? "", 10);
+        e({
+          codec: a.codec_name,
+          sampleRate: c,
+          channels: d,
+          channelLayout: a.channel_layout ?? "",
+          bitRate: Number.isFinite(m) && m > 0 ? m : 0
         });
       }
     );
   });
 }
-function validateCutPayload(payload) {
-  if (!payload || typeof payload !== "object") {
+function ie(t) {
+  if (!t || typeof t != "object")
     throw new Error("Invalid cut payload.");
-  }
-  const candidate = payload;
-  if (!candidate.inputPath || typeof candidate.inputPath !== "string") {
+  const e = t;
+  if (!e.inputPath || typeof e.inputPath != "string")
     throw new Error("inputPath is required.");
-  }
-  if (!candidate.outputPath || typeof candidate.outputPath !== "string") {
+  if (!e.outputPath || typeof e.outputPath != "string")
     throw new Error("outputPath is required.");
-  }
-  if (!isFiniteNumber(candidate.startTime) || candidate.startTime < 0) {
+  if (!E(e.startTime) || e.startTime < 0)
     throw new Error("startTime must be a finite number >= 0.");
-  }
-  if (!isFiniteNumber(candidate.endTime) || candidate.endTime <= candidate.startTime) {
+  if (!E(e.endTime) || e.endTime <= e.startTime)
     throw new Error("endTime must be greater than startTime.");
-  }
-  if (candidate.endTime - candidate.startTime < 0.05) {
+  if (e.endTime - e.startTime < 0.05)
     throw new Error("Cut duration must be at least 0.05 seconds.");
-  }
-  if (candidate.mode && candidate.mode !== "copy" && candidate.mode !== "precise") {
+  if (e.mode && e.mode !== "copy" && e.mode !== "precise")
     throw new Error("mode must be either copy or precise.");
-  }
+  if (e.fadeIn != null && typeof e.fadeIn != "boolean")
+    throw new Error("fadeIn must be a boolean.");
+  if (e.fadeOut != null && typeof e.fadeOut != "boolean")
+    throw new Error("fadeOut must be a boolean.");
+  if (e.fadeInDuration != null && (!E(e.fadeInDuration) || e.fadeInDuration <= 0))
+    throw new Error("fadeInDuration must be a finite number > 0.");
+  if (e.fadeOutDuration != null && (!E(e.fadeOutDuration) || e.fadeOutDuration <= 0))
+    throw new Error("fadeOutDuration must be a finite number > 0.");
   return {
-    inputPath: toAbsolutePath(candidate.inputPath),
-    startTime: candidate.startTime,
-    endTime: candidate.endTime,
-    outputPath: toAbsolutePath(candidate.outputPath),
-    mode: candidate.mode
+    inputPath: h(e.inputPath),
+    startTime: e.startTime,
+    endTime: e.endTime,
+    outputPath: h(e.outputPath),
+    mode: e.mode,
+    fadeIn: e.fadeIn ?? !1,
+    fadeOut: e.fadeOut ?? !1,
+    fadeInDuration: e.fadeInDuration ?? D,
+    fadeOutDuration: e.fadeOutDuration ?? D
   };
 }
-function validateMergePayload(payload) {
-  if (!payload || typeof payload !== "object") {
+function se(t) {
+  if (!t || typeof t != "object")
     throw new Error("Invalid merge payload.");
-  }
-  const candidate = payload;
-  if (!Array.isArray(candidate.filePaths)) {
+  const e = t;
+  if (!Array.isArray(e.filePaths))
     throw new Error("filePaths must be an array.");
-  }
-  if (candidate.filePaths.length < 2) {
+  if (e.filePaths.length < 2)
     throw new Error("At least two files are required to merge.");
-  }
-  if (!candidate.outputPath || typeof candidate.outputPath !== "string") {
+  if (!e.outputPath || typeof e.outputPath != "string")
     throw new Error("outputPath is required.");
-  }
-  const normalizedFilePaths = candidate.filePaths.map((filePath) => {
-    if (typeof filePath !== "string" || filePath.trim().length === 0) {
+  const n = e.filePaths.map((o) => {
+    if (typeof o != "string" || o.trim().length === 0)
       throw new Error("Each merge file path must be a non-empty string.");
-    }
-    return toAbsolutePath(filePath);
+    return h(o);
   });
-  const dedupeSet = new Set(normalizedFilePaths.map(normalizeForCompare));
-  if (dedupeSet.size !== normalizedFilePaths.length) {
+  if (new Set(n.map(ue)).size !== n.length)
     throw new Error("Duplicate file paths are not allowed in merge queue.");
-  }
   return {
-    filePaths: normalizedFilePaths,
-    outputPath: toAbsolutePath(candidate.outputPath)
+    filePaths: n,
+    outputPath: h(e.outputPath)
   };
 }
-function normalizeForCompare(filePath) {
-  return path.normalize(filePath).toLowerCase();
+function ue(t) {
+  return s.normalize(t).toLowerCase();
 }
-function buildCutCodecArgs(inputExt, outputExt, mode) {
-  const shouldUseCopy = mode !== "precise" && PASSTHROUGH_EXTENSIONS.has(inputExt);
-  if (shouldUseCopy) {
-    if (outputExt !== inputExt) {
+function le(t, e, n, r) {
+  if (n !== "precise" && O.has(t)) {
+    if (e !== t)
       throw new Error(
         "For MP3/M4A passthrough cuts, output extension must match input extension."
       );
-    }
     return ["-c", "copy"];
   }
-  if (outputExt === ".mp3") {
+  if (e === ".mp3")
     return ["-c:a", "libmp3lame", "-b:a", "192k"];
-  }
-  if (outputExt === ".m4a") {
-    return ["-c:a", "aac", "-b:a", "192k"];
-  }
-  if (outputExt === ".wav") {
+  if (e === ".m4a")
+    return ["-c:a", "aac", "-b:a", r && r > 0 ? `${Math.round(r / 1e3)}k` : "256k"];
+  if (e === ".wav")
     return ["-c:a", "pcm_s16le"];
-  }
-  if (outputExt === ".flac") {
+  if (e === ".flac")
     return ["-c:a", "flac"];
-  }
   throw new Error(
     "Unsupported output extension. Use .mp3, .m4a, .wav, or .flac."
   );
 }
-function normalizeExtension(value) {
-  if (!value) {
-    return "";
+function ce(t, e, n, r, o) {
+  if (!e && !n)
+    return null;
+  const u = Math.max(0.01, t / 2), i = Math.min(
+    u,
+    Math.max(0.01, r)
+  ), l = Math.min(
+    u,
+    Math.max(0.01, o)
+  ), a = [];
+  if (e && a.push(`afade=t=in:st=0:d=${v(i)}`), n) {
+    const c = Math.max(0, t - l);
+    a.push(
+      `afade=t=out:st=${v(c)}:d=${v(l)}`
+    );
   }
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  return normalized.startsWith(".") ? normalized : `.${normalized}`;
+  return a.join(",");
 }
-function sanitizeDefaultName(value, fallback) {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return fallback;
-  }
-  const basenameOnly = path.basename(trimmed);
-  const noControlChars = [...basenameOnly].filter((char) => {
-    const code = char.charCodeAt(0);
-    return code >= 32 && code !== 127;
-  }).join("");
-  const safe = noControlChars.trim();
-  return safe || fallback;
+function fe(t) {
+  if (!t)
+    return "";
+  const e = t.trim().toLowerCase();
+  return e ? e.startsWith(".") ? e : `.${e}` : "";
 }
-function validateSaveAudioDialogPayload(payload) {
-  if (payload == null) {
-    return { defaultName: "clip.wav", forceDialog: false };
-  }
-  if (typeof payload !== "object") {
+function B(t, e) {
+  if (typeof t != "string")
+    return e;
+  const n = t.trim();
+  return n && [...s.basename(n)].filter((i) => {
+    const l = i.charCodeAt(0);
+    return l >= 32 && l !== 127;
+  }).join("").trim() || e;
+}
+function de(t) {
+  if (t == null)
+    return { defaultName: "clip.wav", forceDialog: !1 };
+  if (typeof t != "object")
     throw new Error("Invalid save-audio payload.");
-  }
-  const candidate = payload;
-  const mode = candidate.mode;
-  if (mode && mode !== "copy" && mode !== "precise") {
+  const e = t, n = e.mode;
+  if (n && n !== "copy" && n !== "precise")
     throw new Error("save-audio mode must be either copy or precise.");
-  }
-  if (candidate.forceDialog != null && typeof candidate.forceDialog !== "boolean") {
+  if (e.forceDialog != null && typeof e.forceDialog != "boolean")
     throw new Error("save-audio forceDialog must be a boolean.");
-  }
   return {
-    defaultName: sanitizeDefaultName(candidate.defaultName, "clip.wav"),
-    inputExtension: normalizeExtension(candidate.inputExtension),
-    mode,
-    forceDialog: candidate.forceDialog ?? false
+    defaultName: B(e.defaultName, "clip.wav"),
+    inputExtension: fe(e.inputExtension),
+    mode: n,
+    forceDialog: e.forceDialog ?? !1
   };
 }
-function validateSaveMergeDialogPayload(payload) {
-  if (payload == null) {
-    return { defaultName: "merged.wav", forceDialog: false };
-  }
-  if (typeof payload !== "object") {
+function me(t) {
+  if (t == null)
+    return { defaultName: "merged.wav", forceDialog: !1 };
+  if (typeof t != "object")
     throw new Error("Invalid save-merge payload.");
-  }
-  const candidate = payload;
-  if (candidate.forceDialog != null && typeof candidate.forceDialog !== "boolean") {
+  const e = t;
+  if (e.forceDialog != null && typeof e.forceDialog != "boolean")
     throw new Error("save-merge forceDialog must be a boolean.");
-  }
   return {
-    defaultName: sanitizeDefaultName(candidate.defaultName, "merged.wav"),
-    forceDialog: candidate.forceDialog ?? false
+    defaultName: B(e.defaultName, "merged.wav"),
+    forceDialog: e.forceDialog ?? !1
   };
 }
-function buildSaveAudioFilters(inputExtension, mode) {
-  if (PASSTHROUGH_EXTENSIONS.has(inputExtension) && mode !== "precise") {
-    if (inputExtension === ".mp3") {
-      return [{ name: "MP3", extensions: ["mp3"] }];
-    }
-    return [{ name: "M4A", extensions: ["m4a"] }];
-  }
-  if (!PASSTHROUGH_EXTENSIONS.has(inputExtension)) {
-    return [
-      { name: "WAV", extensions: ["wav"] },
-      { name: "FLAC", extensions: ["flac"] }
-    ];
-  }
+function pe(t, e) {
+  return O.has(t) && e !== "precise" ? t === ".mp3" ? [{ name: "MP3", extensions: ["mp3"] }] : [{ name: "M4A", extensions: ["m4a"] }] : O.has(t) ? [
+    { name: "MP3", extensions: ["mp3"] },
+    { name: "M4A", extensions: ["m4a"] },
+    { name: "WAV", extensions: ["wav"] },
+    { name: "FLAC", extensions: ["flac"] }
+  ] : [
+    { name: "WAV", extensions: ["wav"] },
+    { name: "FLAC", extensions: ["flac"] }
+  ];
+}
+function he() {
   return [
     { name: "MP3", extensions: ["mp3"] },
     { name: "M4A", extensions: ["m4a"] },
@@ -349,323 +321,233 @@ function buildSaveAudioFilters(inputExtension, mode) {
     { name: "FLAC", extensions: ["flac"] }
   ];
 }
-function buildSaveMergeFilters() {
-  return [
-    { name: "MP3", extensions: ["mp3"] },
-    { name: "M4A", extensions: ["m4a"] },
-    { name: "WAV", extensions: ["wav"] },
-    { name: "FLAC", extensions: ["flac"] }
-  ];
-}
-function buildMergeCodecArgs(outputExt) {
-  if (outputExt === ".wav") {
+function we(t) {
+  if (t === ".wav")
     return ["-c:a", "pcm_s16le"];
-  }
-  if (outputExt === ".flac") {
+  if (t === ".flac")
     return ["-c:a", "flac"];
-  }
   throw new Error("Mixed-format merges must be saved as .wav or .flac.");
 }
-function buildNormalizedConcatFilter(inputCount) {
-  const normalizeChains = [];
-  const concatInputs = [];
-  for (let index = 0; index < inputCount; index += 1) {
-    const outputLabel = `a${index}`;
-    normalizeChains.push(
-      `[${index}:a]aresample=48000,aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo[${outputLabel}]`
-    );
-    concatInputs.push(`[${outputLabel}]`);
+function ge(t) {
+  const e = [], n = [];
+  for (let r = 0; r < t; r += 1) {
+    const o = `a${r}`;
+    e.push(
+      `[${r}:a]aresample=48000,aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo[${o}]`
+    ), n.push(`[${o}]`);
   }
-  normalizeChains.push(
-    `${concatInputs.join("")}concat=n=${inputCount}:v=0:a=1[outa]`
+  return e.push(
+    `${n.join("")}concat=n=${t}:v=0:a=1[outa]`
+  ), e.join(";");
+}
+function Pe(t) {
+  return t.replace(/'/g, "'\\''");
+}
+function ve(t) {
+  return t.map((e) => `file '${Pe(e)}'`).join(`
+`);
+}
+function be(t) {
+  if (t.length < 2)
+    return !1;
+  const e = t[0];
+  return t.every((n) => n.codec !== e.codec || n.sampleRate !== e.sampleRate || n.channels !== e.channels ? !1 : e.channelLayout && n.channelLayout ? n.channelLayout === e.channelLayout : !0);
+}
+function j(t, e) {
+  var i;
+  const n = new Set(
+    (e == null ? void 0 : e.flatMap((l) => l.extensions)) ?? []
   );
-  return normalizeChains.join(";");
+  if (n.size === 0)
+    return t;
+  const r = s.extname(t).toLowerCase().replace(/^\./, "");
+  if (r && n.has(r))
+    return t;
+  const o = (i = e == null ? void 0 : e[0]) == null ? void 0 : i.extensions[0];
+  return o ? `${s.extname(t).length > 0 ? t.slice(0, -s.extname(t).length) : t}.${o}` : t;
 }
-function escapeConcatListPath(filePath) {
-  return filePath.replace(/'/g, "'\\''");
-}
-function buildConcatListContent(filePaths) {
-  return filePaths.map((filePath) => `file '${escapeConcatListPath(filePath)}'`).join("\n");
-}
-function isStreamCompatibleForCopy(streams) {
-  if (streams.length < 2) {
-    return false;
-  }
-  const base = streams[0];
-  return streams.every((stream) => {
-    if (stream.codec !== base.codec) {
-      return false;
-    }
-    if (stream.sampleRate !== base.sampleRate) {
-      return false;
-    }
-    if (stream.channels !== base.channels) {
-      return false;
-    }
-    if (base.channelLayout && stream.channelLayout) {
-      return stream.channelLayout === base.channelLayout;
-    }
-    return true;
-  });
-}
-function alignDefaultNameExtension(defaultName, filters) {
-  var _a;
-  const allowed = new Set(
-    (filters == null ? void 0 : filters.flatMap((filter) => filter.extensions)) ?? []
-  );
-  if (allowed.size === 0) {
-    return defaultName;
-  }
-  const currentExt = path.extname(defaultName).toLowerCase().replace(/^\./, "");
-  if (currentExt && allowed.has(currentExt)) {
-    return defaultName;
-  }
-  const firstAllowed = (_a = filters == null ? void 0 : filters[0]) == null ? void 0 : _a.extensions[0];
-  if (!firstAllowed) {
-    return defaultName;
-  }
-  const baseName = path.extname(defaultName).length > 0 ? defaultName.slice(0, -path.extname(defaultName).length) : defaultName;
-  return `${baseName}.${firstAllowed}`;
-}
-function checkFfmpeg() {
-  return new Promise((resolve) => {
-    execFile("ffmpeg", ["-version"], { windowsHide: true }, (error, stdout) => {
-      if (error) {
-        resolve({ available: false, version: "" });
+function ye() {
+  return new Promise((t) => {
+    I("ffmpeg", ["-version"], { windowsHide: !0 }, (e, n) => {
+      if (e) {
+        t({ available: !1, version: "" });
         return;
       }
-      const firstLine = stdout.split(/\r?\n/, 1)[0] ?? "";
-      resolve({ available: true, version: firstLine.trim() });
+      const r = n.split(/\r?\n/, 1)[0] ?? "";
+      t({ available: !0, version: r.trim() });
     });
   });
 }
-function registerIpcHandlers() {
-  ipcMain.handle("ffmpeg:check", () => checkFfmpeg());
-  ipcMain.handle("audio:read-file", async (_event, payload) => {
-    if (typeof payload !== "string" || payload.trim().length === 0) {
+function Ee() {
+  p.handle("ffmpeg:check", () => ye()), p.handle("audio:read-file", async (t, e) => {
+    if (typeof e != "string" || e.trim().length === 0)
       throw new Error("A valid file path is required.");
-    }
-    const targetPath = toAbsolutePath(payload);
-    await ensureFile(targetPath);
-    const bytes = await readFile(targetPath);
-    const byteOffset = bytes.byteOffset;
-    const byteLength = bytes.byteLength;
-    const arrayBuffer = bytes.buffer.slice(byteOffset, byteOffset + byteLength);
-    return { arrayBuffer };
-  });
-  ipcMain.handle("dialog:open-audio", async () => {
-    const options = {
+    const n = h(e);
+    await S(n);
+    const r = await U(n), o = r.byteOffset, u = r.byteLength;
+    return { arrayBuffer: r.buffer.slice(o, o + u) };
+  }), p.handle("dialog:open-audio", async () => {
+    const t = {
       title: "Select Audio File",
       properties: ["openFile", "multiSelections"],
       filters: [
         {
           name: "Audio Files",
-          extensions: AUDIO_EXTENSIONS
+          extensions: re
         }
       ]
-    };
-    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
-    const result = browserWindow ? await dialog.showOpenDialog(browserWindow, options) : await dialog.showOpenDialog(options);
-    if (result.canceled) {
-      return { filePaths: [] };
-    }
-    return {
-      filePaths: result.filePaths.map(
-        (selectedPath) => path.resolve(selectedPath)
+    }, e = g ?? P.getFocusedWindow(), n = e ? await w.showOpenDialog(e, t) : await w.showOpenDialog(t);
+    return n.canceled ? { filePaths: [] } : {
+      filePaths: n.filePaths.map(
+        (r) => s.resolve(r)
       )
     };
-  });
-  ipcMain.handle("dialog:select-output-folder", async () => {
-    const options = {
+  }), p.handle("dialog:select-output-folder", async () => {
+    const t = {
       title: "Select Default Output Folder",
       properties: ["openDirectory", "createDirectory"]
+    }, e = g ?? P.getFocusedWindow(), n = e ? await w.showOpenDialog(e, t) : await w.showOpenDialog(t);
+    return n.canceled || n.filePaths.length === 0 ? { folderPath: void 0 } : {
+      folderPath: h(n.filePaths[0])
     };
-    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
-    const result = browserWindow ? await dialog.showOpenDialog(browserWindow, options) : await dialog.showOpenDialog(options);
-    if (result.canceled || result.filePaths.length === 0) {
-      return { folderPath: void 0 };
-    }
-    return {
-      folderPath: toAbsolutePath(result.filePaths[0])
-    };
-  });
-  ipcMain.handle("settings:get-default-output-folder", () => {
-    return { folderPath: appSettings.defaultOutputFolder ?? void 0 };
-  });
-  ipcMain.handle(
+  }), p.handle("settings:get-default-output-folder", () => ({ folderPath: f.defaultOutputFolder ?? void 0 })), p.handle(
     "settings:set-default-output-folder",
-    async (_event, payload) => {
-      if (typeof payload !== "string" || payload.trim().length === 0) {
+    async (t, e) => {
+      if (typeof e != "string" || e.trim().length === 0)
         throw new Error("A valid output folder path is required.");
-      }
-      const folderPath = toAbsolutePath(payload);
-      const exists = await isExistingDirectory(folderPath);
-      if (!exists) {
+      const n = h(e);
+      if (!await _(n))
         throw new Error("Selected output folder does not exist.");
-      }
-      appSettings = {
-        ...appSettings,
-        defaultOutputFolder: folderPath
-      };
-      await saveSettings(appSettings);
-      return { folderPath };
+      return f = {
+        ...f,
+        defaultOutputFolder: n
+      }, await y(f), { folderPath: n };
     }
-  );
-  ipcMain.handle("settings:clear-default-output-folder", async () => {
-    appSettings = {
-      ...appSettings,
-      defaultOutputFolder: null
-    };
-    await saveSettings(appSettings);
-    return { success: true };
-  });
-  ipcMain.handle("dialog:save-audio", async (_event, payload) => {
-    const validated = validateSaveAudioDialogPayload(payload);
-    const requestedDefaultName = validated.defaultName ?? "clip.wav";
-    const filters = buildSaveAudioFilters(
-      validated.inputExtension ?? "",
-      validated.mode
-    );
-    const defaultName = alignDefaultNameExtension(
-      requestedDefaultName,
-      filters
-    );
-    const savedFolder = appSettings.defaultOutputFolder;
-    const hasSavedFolder = typeof savedFolder === "string" && savedFolder.length > 0 && await isExistingDirectory(savedFolder);
-    if (!validated.forceDialog && hasSavedFolder) {
+  ), p.handle("settings:clear-default-output-folder", async () => (f = {
+    ...f,
+    defaultOutputFolder: null
+  }, await y(f), { success: !0 })), p.handle("dialog:save-audio", async (t, e) => {
+    const n = de(e), r = n.defaultName ?? "clip.wav", o = pe(
+      n.inputExtension ?? "",
+      n.mode
+    ), u = j(
+      r,
+      o
+    ), i = f.defaultOutputFolder, l = typeof i == "string" && i.length > 0 && await _(i);
+    if (!n.forceDialog && l)
       return {
-        filePath: toAbsolutePath(path.join(savedFolder, defaultName))
+        filePath: h(s.join(i, u))
       };
-    }
-    const options = {
+    const a = {
       title: "Save Cut Audio",
-      defaultPath: hasSavedFolder ? path.join(savedFolder, defaultName) : defaultName,
-      filters
-    };
-    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
-    const result = browserWindow ? await dialog.showSaveDialog(browserWindow, options) : await dialog.showSaveDialog(options);
-    if (result.canceled || !result.filePath) {
+      defaultPath: l ? s.join(i, u) : u,
+      filters: o
+    }, c = g ?? P.getFocusedWindow(), d = c ? await w.showSaveDialog(c, a) : await w.showSaveDialog(a);
+    if (d.canceled || !d.filePath)
       return { filePath: void 0 };
-    }
-    const selectedFolder = path.dirname(result.filePath);
-    if (selectedFolder !== appSettings.defaultOutputFolder) {
-      appSettings = {
-        ...appSettings,
-        defaultOutputFolder: selectedFolder
-      };
-      await saveSettings(appSettings).catch(() => void 0);
-    }
-    return { filePath: toAbsolutePath(result.filePath) };
-  });
-  ipcMain.handle("dialog:save-merge", async (_event, payload) => {
-    const validated = validateSaveMergeDialogPayload(payload);
-    const requestedDefaultName = validated.defaultName ?? "merged.wav";
-    const filters = buildSaveMergeFilters();
-    const defaultName = alignDefaultNameExtension(
-      requestedDefaultName,
-      filters
-    );
-    const savedFolder = appSettings.defaultOutputFolder;
-    const hasSavedFolder = typeof savedFolder === "string" && savedFolder.length > 0 && await isExistingDirectory(savedFolder);
-    if (!validated.forceDialog && hasSavedFolder) {
+    const m = s.dirname(d.filePath);
+    return m !== f.defaultOutputFolder && (f = {
+      ...f,
+      defaultOutputFolder: m
+    }, await y(f).catch(() => {
+    })), { filePath: h(d.filePath) };
+  }), p.handle("dialog:save-merge", async (t, e) => {
+    const n = me(e), r = n.defaultName ?? "merged.wav", o = he(), u = j(
+      r,
+      o
+    ), i = f.defaultOutputFolder, l = typeof i == "string" && i.length > 0 && await _(i);
+    if (!n.forceDialog && l)
       return {
-        filePath: toAbsolutePath(path.join(savedFolder, defaultName))
+        filePath: h(s.join(i, u))
       };
-    }
-    const options = {
+    const a = {
       title: "Save Merged Audio",
-      defaultPath: hasSavedFolder ? path.join(savedFolder, defaultName) : defaultName,
-      filters
-    };
-    const browserWindow = win ?? BrowserWindow.getFocusedWindow();
-    const result = browserWindow ? await dialog.showSaveDialog(browserWindow, options) : await dialog.showSaveDialog(options);
-    if (result.canceled || !result.filePath) {
+      defaultPath: l ? s.join(i, u) : u,
+      filters: o
+    }, c = g ?? P.getFocusedWindow(), d = c ? await w.showSaveDialog(c, a) : await w.showSaveDialog(a);
+    if (d.canceled || !d.filePath)
       return { filePath: void 0 };
-    }
-    const selectedFolder = path.dirname(result.filePath);
-    if (selectedFolder !== appSettings.defaultOutputFolder) {
-      appSettings = {
-        ...appSettings,
-        defaultOutputFolder: selectedFolder
-      };
-      await saveSettings(appSettings).catch(() => void 0);
-    }
-    return { filePath: toAbsolutePath(result.filePath) };
-  });
-  ipcMain.handle("audio:cut", async (_event, payload) => {
-    const params = validateCutPayload(payload);
-    await ensureFile(params.inputPath);
-    await ensureDirectoryExists(params.outputPath);
-    const inputExt = getExtension(params.inputPath);
-    const outputExt = getExtension(params.outputPath);
-    if (PASSTHROUGH_EXTENSIONS.has(inputExt)) {
-      if (params.mode !== "precise" && outputExt !== inputExt) {
+    const m = s.dirname(d.filePath);
+    return m !== f.defaultOutputFolder && (f = {
+      ...f,
+      defaultOutputFolder: m
+    }, await y(f).catch(() => {
+    })), { filePath: h(d.filePath) };
+  }), p.handle("audio:cut", async (t, e) => {
+    const n = ie(e);
+    await S(n.inputPath), await L(n.outputPath);
+    const r = F(n.inputPath), o = F(n.outputPath), u = !!(n.fadeIn || n.fadeOut), i = n.mode === "precise" || u ? "precise" : "copy";
+    if (O.has(r)) {
+      if (i !== "precise" && o !== r)
         throw new Error(
           "Output extension must match input for MP3/M4A passthrough cuts."
         );
-      }
-    } else if (!LOSSLESS_OUTPUT_EXTENSIONS.has(outputExt)) {
+    } else if (!M.has(o))
       throw new Error("For non-MP3/M4A sources, output must be .wav or .flac.");
-    }
-    const codecArgs = buildCutCodecArgs(inputExt, outputExt, params.mode);
-    const ffmpegArgs = [
+    let l;
+    i === "precise" && r === ".m4a" && o === ".m4a" && (l = (await R(n.inputPath)).bitRate);
+    const a = le(
+      r,
+      o,
+      i,
+      l
+    ), c = ce(
+      n.endTime - n.startTime,
+      !!n.fadeIn,
+      !!n.fadeOut,
+      n.fadeInDuration ?? D,
+      n.fadeOutDuration ?? D
+    ), d = [
       "-hide_banner",
       "-loglevel",
       "error",
       "-y",
       "-ss",
-      secondsToArgument(params.startTime),
+      v(n.startTime),
       "-to",
-      secondsToArgument(params.endTime),
+      v(n.endTime),
       "-i",
-      params.inputPath,
-      ...codecArgs,
-      params.outputPath
+      n.inputPath,
+      ...c ? ["-af", c] : [],
+      ...a,
+      n.outputPath
     ];
-    await runFfmpeg(ffmpegArgs);
-    return { success: true, outputPath: params.outputPath };
-  });
-  ipcMain.handle("audio:merge", async (_event, payload) => {
-    const params = validateMergePayload(payload);
-    await ensureDirectoryExists(params.outputPath);
-    await Promise.all(params.filePaths.map((filePath) => ensureFile(filePath)));
-    const sourceExtensions = params.filePaths.map(
-      (filePath) => getExtension(filePath)
-    );
-    const firstSourceExt = sourceExtensions[0];
-    const outputExt = getExtension(params.outputPath);
-    if (!MERGE_OUTPUT_EXTENSIONS.has(outputExt)) {
+    return await A(d), { success: !0, outputPath: n.outputPath };
+  }), p.handle("audio:merge", async (t, e) => {
+    const n = se(e);
+    await L(n.outputPath), await Promise.all(n.filePaths.map((a) => S(a)));
+    const r = n.filePaths.map(
+      (a) => F(a)
+    ), o = r[0], u = F(n.outputPath);
+    if (!ae.has(u))
       throw new Error("Merge output must use .mp3, .m4a, .wav, or .flac.");
-    }
-    const allSameSourceExtension = sourceExtensions.every(
-      (ext) => ext === firstSourceExt
+    const i = r.every(
+      (a) => a === o
     );
-    let useStreamCopy = false;
-    if (allSameSourceExtension && COPY_MERGE_EXTENSIONS.has(firstSourceExt)) {
-      const streamInfo = await Promise.all(
-        params.filePaths.map((filePath) => runFfprobe(filePath))
+    let l = !1;
+    if (i && oe.has(o)) {
+      const a = await Promise.all(
+        n.filePaths.map((c) => R(c))
       );
-      useStreamCopy = isStreamCompatibleForCopy(streamInfo);
+      l = be(a);
     }
-    if (useStreamCopy) {
-      if (outputExt !== firstSourceExt) {
+    if (l) {
+      if (u !== o)
         throw new Error(
           "For stream-copy merge, output extension must match source files."
         );
-      }
-      const mergeListPath = path.join(
-        tmpdir(),
-        `audioslice-merge-${randomUUID()}.txt`
+      const a = s.join(
+        K(),
+        `audioslice-merge-${J()}.txt`
       );
       try {
-        await writeFile(
-          mergeListPath,
-          buildConcatListContent(params.filePaths),
+        await W(
+          a,
+          ve(n.filePaths),
           {
             encoding: "utf8"
           }
-        );
-        await runFfmpeg([
+        ), await A([
           "-hide_banner",
           "-loglevel",
           "error",
@@ -675,78 +557,64 @@ function registerIpcHandlers() {
           "-safe",
           "0",
           "-i",
-          mergeListPath,
+          a,
           "-c",
           "copy",
-          params.outputPath
+          n.outputPath
         ]);
       } finally {
-        await unlink(mergeListPath).catch(() => void 0);
+        await Q(a).catch(() => {
+        });
       }
     } else {
-      if (!LOSSLESS_OUTPUT_EXTENSIONS.has(outputExt)) {
+      if (!M.has(u))
         throw new Error("Mixed-format merges must be saved as .wav or .flac.");
-      }
-      const inputArgs = params.filePaths.flatMap((filePath) => [
+      const a = n.filePaths.flatMap((m) => [
         "-i",
-        filePath
-      ]);
-      const filterGraph = buildNormalizedConcatFilter(params.filePaths.length);
-      const codecArgs = buildMergeCodecArgs(outputExt);
-      await runFfmpeg([
+        m
+      ]), c = ge(n.filePaths.length), d = we(u);
+      await A([
         "-hide_banner",
         "-loglevel",
         "error",
         "-y",
-        ...inputArgs,
+        ...a,
         "-filter_complex",
-        filterGraph,
+        c,
         "-map",
         "[outa]",
-        ...codecArgs,
-        params.outputPath
+        ...d,
+        n.outputPath
       ]);
     }
-    return { success: true, outputPath: params.outputPath };
+    return { success: !0, outputPath: n.outputPath };
   });
 }
-function createWindow() {
-  win = new BrowserWindow({
+function H() {
+  g = new P({
     width: 1200,
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    icon: WINDOW_ICON_PATH,
+    icon: ne,
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
-      contextIsolation: true,
-      nodeIntegration: false
+      preload: s.join(q, "preload.mjs"),
+      contextIsolation: !0,
+      nodeIntegration: !1
     }
-  });
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
-  } else {
-    win.loadFile(path.join(RENDERER_DIST, "index.html"));
-  }
+  }), x ? g.loadURL(x) : g.loadFile(s.join(V, "index.html"));
 }
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-    win = null;
-  }
+b.on("window-all-closed", () => {
+  process.platform !== "darwin" && (b.quit(), g = null);
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+b.on("activate", () => {
+  P.getAllWindows().length === 0 && H();
 });
-app.whenReady().then(async () => {
-  appSettings = await loadSettings();
-  registerIpcHandlers();
-  createWindow();
+b.whenReady().then(async () => {
+  f = await ee(), Ee(), H();
 });
 export {
-  MAIN_DIST,
-  RENDERER_DIST,
-  VITE_DEV_SERVER_URL
+  Te as MAIN_DIST,
+  V as RENDERER_DIST,
+  x as VITE_DEV_SERVER_URL
 };

@@ -49,6 +49,10 @@ interface Window {
       endTime: number;
       outputPath: string;
       mode?: "copy" | "precise";
+      fadeIn?: boolean;
+      fadeOut?: boolean;
+      fadeInDuration?: number;
+      fadeOutDuration?: number;
     }) => Promise<{ success: boolean; outputPath?: string }>;
     mergeAudio: (params: {
       filePaths: string[];

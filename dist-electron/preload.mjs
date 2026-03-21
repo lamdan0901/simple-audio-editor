@@ -1,15 +1,1 @@
-"use strict";
-const electron = require("electron");
-electron.contextBridge.exposeInMainWorld("api", {
-  checkFfmpeg: () => electron.ipcRenderer.invoke("ffmpeg:check"),
-  readAudioFile: (filePath) => electron.ipcRenderer.invoke("audio:read-file", filePath),
-  openAudioFile: () => electron.ipcRenderer.invoke("dialog:open-audio"),
-  selectOutputFolder: () => electron.ipcRenderer.invoke("dialog:select-output-folder"),
-  getDefaultOutputFolder: () => electron.ipcRenderer.invoke("settings:get-default-output-folder"),
-  setDefaultOutputFolder: (folderPath) => electron.ipcRenderer.invoke("settings:set-default-output-folder", folderPath),
-  clearDefaultOutputFolder: () => electron.ipcRenderer.invoke("settings:clear-default-output-folder"),
-  saveAudioFile: (params) => electron.ipcRenderer.invoke("dialog:save-audio", params),
-  saveMergeFile: (params) => electron.ipcRenderer.invoke("dialog:save-merge", params),
-  cutAudio: (params) => electron.ipcRenderer.invoke("audio:cut", params),
-  mergeAudio: (params) => electron.ipcRenderer.invoke("audio:merge", params)
-});
+"use strict";const e=require("electron");e.contextBridge.exposeInMainWorld("api",{checkFfmpeg:()=>e.ipcRenderer.invoke("ffmpeg:check"),readAudioFile:i=>e.ipcRenderer.invoke("audio:read-file",i),openAudioFile:()=>e.ipcRenderer.invoke("dialog:open-audio"),selectOutputFolder:()=>e.ipcRenderer.invoke("dialog:select-output-folder"),getDefaultOutputFolder:()=>e.ipcRenderer.invoke("settings:get-default-output-folder"),setDefaultOutputFolder:i=>e.ipcRenderer.invoke("settings:set-default-output-folder",i),clearDefaultOutputFolder:()=>e.ipcRenderer.invoke("settings:clear-default-output-folder"),saveAudioFile:i=>e.ipcRenderer.invoke("dialog:save-audio",i),saveMergeFile:i=>e.ipcRenderer.invoke("dialog:save-merge",i),cutAudio:i=>e.ipcRenderer.invoke("audio:cut",i),mergeAudio:i=>e.ipcRenderer.invoke("audio:merge",i)});

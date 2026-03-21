@@ -6,6 +6,10 @@ type CutParams = {
   endTime: number;
   outputPath: string;
   mode?: "copy" | "precise";
+  fadeIn?: boolean;
+  fadeOut?: boolean;
+  fadeInDuration?: number;
+  fadeOutDuration?: number;
 };
 
 type SaveAudioParams = {
